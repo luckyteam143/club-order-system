@@ -9,12 +9,18 @@ use Illuminate\Support\Str;
 use Maatwebsite\Excel\Concerns\SkipsFailures;
 use Maatwebsite\Excel\Concerns\SkipsOnFailure;
 use Maatwebsite\Excel\Concerns\ToCollection;
+use Maatwebsite\Excel\Concerns\WithChunkReading;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithValidation;
 
-class ProductsImport implements SkipsOnFailure, ToCollection, WithHeadingRow, WithValidation
+class ProductsImport implements SkipsOnFailure, ToCollection, WithChunkReading, WithHeadingRow, WithValidation
 {
     use SkipsFailures;
+
+    public function chunkSize(): int
+    {
+        return 500;
+    }
 
     public function collection(Collection $rows): void
     {
