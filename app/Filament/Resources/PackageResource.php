@@ -42,7 +42,7 @@ class PackageResource extends Resource
                     ->schema([
                         Forms\Components\Select::make('id')
                             ->label('Product')
-                            ->relationship('products', 'name')
+                            ->options(\App\Models\Product::pluck('name', 'id'))
                             ->searchable()
                             ->preload()
                             ->disableOptionsWhenSelectedInSiblingRepeaterItems(),

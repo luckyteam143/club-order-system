@@ -22,6 +22,11 @@ class Product extends Model
         return $this->belongsToMany(Package::class)->withPivot(['qty', 'per_item_price'])->withTimestamps();
     }
 
+    public function attributes(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Attribute::class)->withTimestamps();
+    }
+
     public function orderItemCells(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(OrderItemCell::class);

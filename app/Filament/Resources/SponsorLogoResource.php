@@ -21,6 +21,12 @@ class SponsorLogoResource extends Resource
     public static function form(Form $form): Form
     {
         return $form->schema([
+            Forms\Components\Select::make('club_id')
+                ->label('Club')
+                ->relationship('club', 'name')
+                ->searchable()
+                ->preload()
+                ->required(),
             Forms\Components\TextInput::make('name')->required()->maxLength(255),
             Forms\Components\FileUpload::make('file')
                 ->label('Logo Image')
@@ -43,13 +49,16 @@ class SponsorLogoResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\ImageColumn::make('file')->label('Logo')->circular(false),
+                Tables\Columns\TextColumn::make('club.name')->label('Club')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('positions')
                     ->badge()
                     ->getStateUsing(fn ($record) => $record->positions ?? []),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
-            ->filters([])
+            ->filters([
+                Tables\Filters\SelectFilter::make('club')->relationship('club', 'name'),
+            ])
             ->actions([Tables\Actions\EditAction::make()])
             ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])]);
     }

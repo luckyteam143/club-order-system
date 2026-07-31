@@ -38,6 +38,15 @@ class ProductResource extends Resource
                     ->label('Expected Back In Stock')
                     ->visible(fn ($get) => $get('on_backorder')),
             ])->columns(2),
+
+            Forms\Components\Section::make('Attributes')->schema([
+                Forms\Components\Select::make('attributes')
+                    ->label('Attributes')
+                    ->relationship('attributes', 'name')
+                    ->multiple()
+                    ->searchable()
+                    ->preload(),
+            ]),
         ]);
     }
 
@@ -56,6 +65,7 @@ class ProductResource extends Resource
                     }),
                 Tables\Columns\IconColumn::make('on_backorder')->label('Backorder')->boolean(),
                 Tables\Columns\TextColumn::make('retail_price')->label('Price')->money('GBP')->sortable(),
+                Tables\Columns\TextColumn::make('attributes.name')->label('Attributes')->badge()->toggleable(),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
