@@ -170,6 +170,7 @@
                         <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                                 <select x-model="sponsor.item_key" @change="syncNow()"
+                                    x-init="$nextTick(() => { $el.value = sponsor.item_key || '' })"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select item…</option>
                                     <template x-for="col in columns" :key="col.key">
@@ -179,6 +180,7 @@
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                                 <select x-model.number="sponsor.sponsor_logo_id" @change="onSponsorLogoChange(sponsor)"
+                                    x-init="$nextTick(() => { $el.value = sponsor.sponsor_logo_id || '' })"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select logo…</option>
                                     <template x-for="logo in sponsorLogosForClub()" :key="logo.id">
@@ -188,6 +190,7 @@
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                                 <select x-model.number="sponsor.embellishment_position_id" @change="syncNow()"
+                                    x-init="$nextTick(() => { $el.value = sponsor.embellishment_position_id || '' })"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">—</option>
                                     <template x-for="pos in embellishmentPositions" :key="pos.id">
