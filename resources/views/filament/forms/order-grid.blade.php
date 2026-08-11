@@ -192,32 +192,29 @@
                     <template x-for="sponsor in sponsorRows" :key="sponsor.key">
                         <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model="sponsor.item_key" @change="sync()"
-                                    x-init="$nextTick(() => { $el.value = sponsor.item_key || '' })"
+                                <select @change="sponsor.item_key = $event.target.value; sync()"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select item…</option>
                                     <template x-for="col in columns" :key="col.key">
-                                        <option :value="col.key" x-text="productName(col.product_id) || 'Untitled item'"></option>
+                                        <option :value="col.key" :selected="col.key === sponsor.item_key" x-text="productName(col.product_id) || 'Untitled item'"></option>
                                     </template>
                                 </select>
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model.number="sponsor.sponsor_logo_id" @change="onSponsorLogoChange(sponsor)"
-                                    x-init="$nextTick(() => { $el.value = sponsor.sponsor_logo_id || '' })"
+                                <select @change="sponsor.sponsor_logo_id = $event.target.value ? parseInt($event.target.value) : null; onSponsorLogoChange(sponsor)"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select logo…</option>
                                     <template x-for="logo in sponsorLogosForClub()" :key="logo.id">
-                                        <option :value="logo.id" x-text="logo.name + ' ($' + logo.price.toFixed(2) + ')'"></option>
+                                        <option :value="logo.id" :selected="logo.id == sponsor.sponsor_logo_id" x-text="logo.name + ' ($' + logo.price.toFixed(2) + ')'"></option>
                                     </template>
                                 </select>
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model.number="sponsor.embellishment_position_id" @change="sync()"
-                                    x-init="$nextTick(() => { $el.value = sponsor.embellishment_position_id || '' })"
+                                <select @change="sponsor.embellishment_position_id = $event.target.value ? parseInt($event.target.value) : null; sync()"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">—</option>
                                     <template x-for="pos in embellishmentPositions" :key="pos.id">
-                                        <option :value="pos.id" x-text="pos.name"></option>
+                                        <option :value="pos.id" :selected="pos.id == sponsor.embellishment_position_id" x-text="pos.name"></option>
                                     </template>
                                 </select>
                             </td>
@@ -259,32 +256,29 @@
                     <template x-for="embellishment in embellishmentRows" :key="embellishment.key">
                         <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model="embellishment.item_key" @change="sync()"
-                                    x-init="$nextTick(() => { $el.value = embellishment.item_key || '' })"
+                                <select @change="embellishment.item_key = $event.target.value; sync()"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select item…</option>
                                     <template x-for="col in columns" :key="col.key">
-                                        <option :value="col.key" x-text="productName(col.product_id) || 'Untitled item'"></option>
+                                        <option :value="col.key" :selected="col.key === embellishment.item_key" x-text="productName(col.product_id) || 'Untitled item'"></option>
                                     </template>
                                 </select>
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model.number="embellishment.embellishment_id" @change="onEmbellishmentChange(embellishment)"
-                                    x-init="$nextTick(() => { $el.value = embellishment.embellishment_id || '' })"
+                                <select @change="embellishment.embellishment_id = $event.target.value ? parseInt($event.target.value) : null; onEmbellishmentChange(embellishment)"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select embellishment…</option>
                                     <template x-for="e in embellishments" :key="e.id">
-                                        <option :value="e.id" x-text="e.name + ' ($' + e.cost.toFixed(2) + ')'"></option>
+                                        <option :value="e.id" :selected="e.id == embellishment.embellishment_id" x-text="e.name + ' ($' + e.cost.toFixed(2) + ')'"></option>
                                     </template>
                                 </select>
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model.number="embellishment.embellishment_position_id" @change="sync()"
-                                    x-init="$nextTick(() => { $el.value = embellishment.embellishment_position_id || '' })"
+                                <select @change="embellishment.embellishment_position_id = $event.target.value ? parseInt($event.target.value) : null; sync()"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">—</option>
                                     <template x-for="pos in embellishmentPositions" :key="pos.id">
-                                        <option :value="pos.id" x-text="pos.name"></option>
+                                        <option :value="pos.id" :selected="pos.id == embellishment.embellishment_position_id" x-text="pos.name"></option>
                                     </template>
                                 </select>
                             </td>
