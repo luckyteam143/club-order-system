@@ -106,7 +106,7 @@
                         <template x-for="col in columns" :key="col.key">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1" x-init="ensureCell(row, col.key)">
                                 <input type="text" x-show="col.product_id"
-                                    :list="'order-grid-sizes-' + col.key"
+                                    :list="'order-grid-sizes-' + rowIndex + '-' + col.key"
                                     :value="row.cells[col.key] ? row.cells[col.key].size : ''"
                                     :data-row="rowIndex" :data-col="col.key"
                                     placeholder="Size…"
@@ -119,7 +119,7 @@
                                     @paste="onPaste($event, rowIndex, col.key)"
                                     @input="onSizeTyping($event, row, col)"
                                     @change="onSizeInput($event, row, col)">
-                                <datalist :id="'order-grid-sizes-' + col.key">
+                                <datalist :id="'order-grid-sizes-' + rowIndex + '-' + col.key">
                                     <template x-for="size in productSizes(col)" :key="size">
                                         <option :value="size"></option>
                                     </template>
@@ -484,14 +484,16 @@ function orderGrid(config) {
             this.syncNow();
         },
 
-        // Inserts a copy of a row directly below it — same player details and
-        // item sizes, ready to tweak (e.g. same family/teammate ordering the
-        // same kit in a different size).
+        // Appends a copy of a row (same player details and item sizes) to the
+        // end of the list — ready to tweak (e.g. same family/teammate
+        // ordering the same kit in a different size). Appended rather than
+        // inserted right after the source: inserting mid-array forces every
+        // later row's index to shift, which Alpine's x-for does not handle
+        // cleanly together with the nested per-column x-init on each cell.
         duplicateRow(rowKey) {
-            const index = this.rows.findIndex(r => r.key === rowKey);
-            if (index === -1) return;
+            const source = this.rows.find(r => r.key === rowKey);
+            if (!source) return;
 
-            const source = this.rows[index];
             const copy = {
                 key: this.newKey('tmp'),
                 id: null,
@@ -507,7 +509,7 @@ function orderGrid(config) {
                 copy.cells[col.key] = { size: src ? src.size : '', qty: src ? src.qty : 1, invalid: false };
             });
 
-            this.rows.splice(index + 1, 0, copy);
+            this.rows.push(copy);
             this.syncNow();
         },
 
