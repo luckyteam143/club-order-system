@@ -20,9 +20,9 @@
                 class="fi-btn inline-flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-500">
                 + Add Item Column
             </button>
-            <button type="button" @click="loadPackageItems()"
+            <button type="button" x-show="!isIndividual()" @click="loadPackageItems()"
                 class="fi-btn inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
-                ⤓ Load Package Items
+                ↻ Resync Package Items
             </button>
         </div>
         <p class="text-xs text-gray-500 dark:text-gray-400">
@@ -108,22 +108,17 @@
 
                         <template x-for="col in columns" :key="col.key">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <div class="flex items-center gap-1" x-show="col.product_id">
-                                    <select :data-row="rowIndex" :data-col="col.key"
-                                        x-model="cellFor(row, col.key).size"
-                                        @keydown.enter.prevent="moveDown($event)"
-                                        @paste="onPaste($event, rowIndex, col.key)"
-                                        @change="sync()"
-                                        class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                                        <option value="">—</option>
-                                        <template x-for="size in productSizes(col)" :key="size">
-                                            <option :value="size" x-text="size"></option>
-                                        </template>
-                                    </select>
-                                    <input type="number" min="1" x-show="cellFor(row, col.key).size"
-                                        x-model.number="cellFor(row, col.key).qty" @input="sync()"
-                                        class="fi-input w-14 rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                                </div>
+                                <select x-show="col.product_id" :data-row="rowIndex" :data-col="col.key"
+                                    x-model="cellFor(row, col.key).size"
+                                    @keydown.enter.prevent="moveDown($event)"
+                                    @paste="onPaste($event, rowIndex, col.key)"
+                                    @change="sync()"
+                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    <option value="">—</option>
+                                    <template x-for="size in productSizes(col)" :key="size">
+                                        <option :value="size" x-text="size"></option>
+                                    </template>
+                                </select>
                             </td>
                         </template>
 
@@ -176,6 +171,21 @@ function orderGrid(config) {
             if (this.rows.length === 0) {
                 this.addRow();
             }
+
+            // Package orders default to one column per package item — load them
+            // automatically the first time, and keep them in sync if the club/
+            // package selection changes.
+            if (this.columns.length === 0 && !this.isIndividual() && this.$wire.data.package_id) {
+                this.loadPackageItems();
+            }
+
+            this.$watch(() => this.$wire.data.package_id, () => {
+                if (!this.isIndividual()) this.loadPackageItems();
+            });
+
+            this.$watch(() => this.$wire.data.type, () => {
+                if (!this.isIndividual() && this.$wire.data.package_id) this.loadPackageItems();
+            });
 
             this.$nextTick(() => this.sync());
         },
@@ -245,11 +255,7 @@ function orderGrid(config) {
         loadPackageItems() {
             const pkgId = this.$wire.data.package_id;
             const pkg = this.packages.find(p => p.id == pkgId);
-            if (!pkg) {
-                alert('Select a package first.');
-                return;
-            }
-            if (this.columns.length && !confirm('This replaces the current item columns with the package items. Continue?')) return;
+            if (!pkg) return;
 
             this.columns = pkg.items.map(item => ({
                 key: this.newKey('tmp'),
