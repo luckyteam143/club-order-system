@@ -22,25 +22,32 @@ class OrderExport implements FromCollection, WithHeadings, WithStyles, WithTitle
 
     public function headings(): array
     {
-        return ['#', 'Player Name', 'Number', 'Initials', 'Item', 'Sponsor Logo', 'Embellishment', 'Size', 'Qty', 'Unit Price (CAD)', 'Line Total (CAD)', 'Notes'];
+        return ['#', 'Player Name', 'Number', 'Initials', 'Item', 'Sponsor Logos', 'Size', 'Qty', 'Unit Price (CAD)', 'Line Total (CAD)', 'Notes'];
     }
 
     public function collection(): Collection
     {
         $rows = collect();
-        $this->order->load('playerRows.itemCells.orderItem.product', 'playerRows.itemCells.orderItem.sponsorLogo', 'playerRows.itemCells.orderItem.embellishment');
+        $this->order->load(
+            'playerRows.itemCells.orderItem.product',
+            'playerRows.itemCells.orderItem.sponsors.sponsorLogo',
+            'playerRows.itemCells.orderItem.sponsors.position',
+        );
 
         foreach ($this->order->playerRows as $player) {
             foreach ($player->itemCells as $cell) {
                 $item = $cell->orderItem;
+                $sponsors = $item?->sponsors
+                    ->map(fn ($s) => $s->sponsorLogo?->name . ($s->position ? ' (' . $s->position->name . ')' : ''))
+                    ->implode(', ');
+
                 $rows->push([
                     $player->player_index,
                     $player->player_name,
                     $player->number,
                     $player->initials,
                     $item?->product?->name,
-                    $item?->sponsorLogo?->name,
-                    $item?->embellishment?->name,
+                    $sponsors,
                     $cell->size,
                     $cell->qty,
                     $item?->unit_price,
@@ -51,7 +58,7 @@ class OrderExport implements FromCollection, WithHeadings, WithStyles, WithTitle
         }
 
         $rows->push([]);
-        $rows->push(['', '', '', '', '', '', '', '', '', 'ORDER TOTAL', $this->order->total, '']);
+        $rows->push(['', '', '', '', '', '', '', '', 'ORDER TOTAL', $this->order->total, '']);
 
         return $rows;
     }

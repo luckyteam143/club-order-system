@@ -3,7 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\OrderResource\Pages;
-use App\Models\Embellishment;
+use App\Models\EmbellishmentPosition;
 use App\Models\Order;
 use App\Models\Package;
 use App\Models\Product;
@@ -27,8 +27,8 @@ class OrderResource extends Resource
     {
         return $form->schema([
 
-            // ── ORDER META ────────────────────────────────────────────────
-            Forms\Components\Section::make('Order Details')
+            // ── ORDER META ── a slim header strip, not a boxed form section ──
+            Forms\Components\Group::make()
                 ->schema([
                     Forms\Components\Select::make('club_id')
                         ->label('Club')
@@ -67,44 +67,29 @@ class OrderResource extends Resource
                         ->dehydrated()
                         ->helperText(fn () => auth()->user()?->isAdmin()
                             ? null
-                            : 'New orders save as Draft. Use "Submit Order" below when it\'s ready — you can keep editing until then.'),
+                            : 'New orders save as Draft — "Submit Order" below when ready.'),
 
                     Forms\Components\Textarea::make('notes')
                         ->label('Order Notes')
-                        ->rows(2)
-                        ->columnSpanFull(),
+                        ->rows(1)
+                        ->columnSpan(4),
                 ])
-                ->columns(2),
+                ->columns(4),
 
-            // ── SPREADSHEET GRID ─────────────────────────────────────────
-            Forms\Components\Section::make('Players & Items')
-                ->description('Fill this in like a spreadsheet: type across cells, Tab/Enter to move, or paste a roster copied straight from Excel. Item columns carry their own sponsor logo / embellishment; each cell picks a size for that player.')
-                ->schema([
-                    Forms\Components\ViewField::make('grid_state')
-                        ->view('filament.forms.order-grid')
-                        ->viewData([
-                            'products'       => self::productsCatalogForGrid(),
-                            'sponsorLogos'   => self::sponsorLogosCatalogForGrid(),
-                            'embellishments' => self::embellishmentsCatalogForGrid(),
-                            'packages'       => self::packagesCatalogForGrid(),
-                        ])
-                        ->default(json_encode(['columns' => [], 'rows' => []]))
-                        ->dehydrateStateUsing(fn ($state) => is_string($state) ? $state : json_encode($state))
-                        ->columnSpanFull(),
-                ]),
-
-            // ── ORDER TOTAL ───────────────────────────────────────────────
-            Forms\Components\Section::make('Summary')
-                ->schema([
-                    Forms\Components\TextInput::make('total')
-                        ->label('Order Total')
-                        ->numeric()
-                        ->prefix('$')
-                        ->default(0)
-                        ->readOnly(fn () => !auth()->user()?->isAdmin())
-                        ->helperText('Recalculated automatically from the grid when you save.'),
+            // ── THE SHEET ──────────────────────────────────────────────────
+            Forms\Components\ViewField::make('grid_state')
+                ->view('filament.forms.order-grid')
+                ->viewData([
+                    'products'               => self::productsCatalogForGrid(),
+                    'sponsorLogos'           => self::sponsorLogosCatalogForGrid(),
+                    'embellishmentPositions' => self::embellishmentPositionsCatalogForGrid(),
+                    'packages'               => self::packagesCatalogForGrid(),
                 ])
-                ->columns(1),
+                ->default(json_encode(['columns' => [], 'rows' => [], 'sponsors' => []]))
+                ->dehydrateStateUsing(fn ($state) => is_string($state) ? $state : json_encode($state))
+                ->columnSpanFull(),
+
+            Forms\Components\Hidden::make('total')->default(0),
         ]);
     }
 
@@ -209,24 +194,24 @@ class OrderResource extends Resource
 
     private static function sponsorLogosCatalogForGrid(): array
     {
-        return SponsorLogo::orderBy('name')->get()
+        return SponsorLogo::with('position')->orderBy('name')->get()
             ->map(fn (SponsorLogo $logo) => [
-                'id'      => $logo->id,
-                'name'    => $logo->name,
-                'price'   => (float) $logo->price,
-                'club_id' => $logo->club_id,
+                'id'          => $logo->id,
+                'name'        => $logo->name,
+                'price'       => (float) $logo->price,
+                'club_id'     => $logo->club_id,
+                'position_id' => $logo->embellishment_position_id,
             ])
             ->values()
             ->all();
     }
 
-    private static function embellishmentsCatalogForGrid(): array
+    private static function embellishmentPositionsCatalogForGrid(): array
     {
-        return Embellishment::orderBy('name')->get()
-            ->map(fn (Embellishment $e) => [
-                'id'   => $e->id,
-                'name' => $e->name,
-                'cost' => (float) $e->cost,
+        return EmbellishmentPosition::orderBy('name')->get()
+            ->map(fn (EmbellishmentPosition $p) => [
+                'id'   => $p->id,
+                'name' => $p->name,
             ])
             ->values()
             ->all();

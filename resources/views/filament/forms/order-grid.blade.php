@@ -1,5 +1,5 @@
 @php
-    $initial = json_decode($getState() ?: '{}', true) ?: ['columns' => [], 'rows' => []];
+    $initial = json_decode($getState() ?: '{}', true) ?: ['columns' => [], 'rows' => [], 'sponsors' => []];
 @endphp
 
 <div
@@ -8,7 +8,7 @@
         initial: @js($initial),
         products: @js($products),
         sponsorLogos: @js($sponsorLogos),
-        embellishments: @js($embellishments),
+        embellishmentPositions: @js($embellishmentPositions),
         packages: @js($packages),
     })"
     x-init="init()"
@@ -45,7 +45,7 @@
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium w-20">Initials</th>
 
                     <template x-for="col in columns" :key="col.key">
-                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 align-top min-w-[13rem]">
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 align-top min-w-[12rem]">
                             <div class="flex items-start justify-between gap-1">
                                 <input type="text" list="order-grid-products"
                                     :value="productName(col.product_id)"
@@ -55,20 +55,6 @@
                                 <button type="button" x-show="isIndividual()" @click="removeColumn(col.key)"
                                     class="shrink-0 text-gray-400 hover:text-danger-600" title="Remove item">✕</button>
                             </div>
-                            <select x-model.number="col.sponsor_logo_id"
-                                class="fi-select mt-1 w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs">
-                                <option value="">No sponsor logo</option>
-                                <template x-for="s in sponsorLogosForClub()" :key="s.id">
-                                    <option :value="s.id" x-text="s.name + ' (+$' + s.price.toFixed(2) + ')'"></option>
-                                </template>
-                            </select>
-                            <select x-model.number="col.embellishment_id"
-                                class="fi-select mt-1 w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs">
-                                <option value="">No embellishment</option>
-                                <template x-for="e in embellishments" :key="e.id">
-                                    <option :value="e.id" x-text="e.name + ' (+$' + e.cost.toFixed(2) + ')'"></option>
-                                </template>
-                            </select>
                             <div class="mt-1 flex items-center gap-1">
                                 <span class="text-xs text-gray-500">$</span>
                                 <input type="number" step="0.01" x-model.number="col.unit_price"
@@ -111,7 +97,7 @@
                         </td>
 
                         <template x-for="col in columns" :key="col.key">
-                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1" x-init="ensureCell(row, col.key)">
                                 <select x-show="col.product_id" :data-row="rowIndex" :data-col="col.key"
                                     x-model="row.cells[col.key].size"
                                     @keydown.enter.prevent="moveDown($event)"
@@ -155,6 +141,70 @@
         class="fi-btn mt-2 inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
         + Add Row
     </button>
+
+    <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Sponsor Logos</h4>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            Add a sponsor logo to any item above, choose which position it prints at. An item can carry more than one logo.
+        </p>
+
+        <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700" x-show="columns.length">
+            <table class="w-full text-sm border-collapse">
+                <thead class="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[12rem]">Item</th>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[12rem]">Sponsor Logo</th>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[10rem]">Position</th>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-right font-medium w-20">Price</th>
+                        <th class="border-b border-gray-200 dark:border-gray-700 px-2 py-2 w-10"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="sponsor in sponsorRows" :key="sponsor.key">
+                        <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                                <select x-model="sponsor.item_key" @change="sync()"
+                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    <option value="">Select item…</option>
+                                    <template x-for="col in columns" :key="col.key">
+                                        <option :value="col.key" x-text="productName(col.product_id) || 'Untitled item'"></option>
+                                    </template>
+                                </select>
+                            </td>
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                                <select x-model.number="sponsor.sponsor_logo_id" @change="onSponsorLogoChange(sponsor)"
+                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    <option value="">Select logo…</option>
+                                    <template x-for="logo in sponsorLogosForClub()" :key="logo.id">
+                                        <option :value="logo.id" x-text="logo.name + ' ($' + logo.price.toFixed(2) + ')'"></option>
+                                    </template>
+                                </select>
+                            </td>
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                                <select x-model.number="sponsor.embellishment_position_id" @change="sync()"
+                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    <option value="">—</option>
+                                    <template x-for="pos in embellishmentPositions" :key="pos.id">
+                                        <option :value="pos.id" x-text="pos.name"></option>
+                                    </template>
+                                </select>
+                            </td>
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1 text-right tabular-nums" x-text="'$' + sponsorPrice(sponsor).toFixed(2)"></td>
+                            <td class="border-b border-gray-100 dark:border-gray-800 p-1 text-center">
+                                <button type="button" @click="removeSponsorRow(sponsor.key)" class="text-gray-400 hover:text-danger-600" title="Remove">🗑</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2" x-show="!columns.length">Add an item column first, then attach sponsor logos to it here.</p>
+
+        <button type="button" x-show="columns.length" @click="addSponsorRow()"
+            class="fi-btn mt-2 inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+            + Add Sponsor Logo
+        </button>
+    </div>
 </div>
 
 <script>
@@ -163,14 +213,16 @@ function orderGrid(config) {
         statePath: config.statePath,
         products: config.products,
         sponsorLogos: config.sponsorLogos,
-        embellishments: config.embellishments,
+        embellishmentPositions: config.embellishmentPositions,
         packages: config.packages,
         columns: [],
         rows: [],
+        sponsorRows: [],
 
         init() {
             this.columns = (config.initial.columns || []).map(c => ({ ...c }));
             this.rows = (config.initial.rows || []).map(r => ({ ...r, cells: { ...(r.cells || {}) } }));
+            this.sponsorRows = (config.initial.sponsors || []).map(s => ({ ...s }));
 
             this.ensureAllCells();
 
@@ -219,30 +271,24 @@ function orderGrid(config) {
             return product ? product.name : '';
         },
 
-        // Guarantees every row has a cell object for every column, so template
-        // bindings can always safely read/write `row.cells[col.key].size`
-        // without racing the reactive array/object mutations that add rows or
-        // columns.
-        ensureAllCells() {
-            this.rows.forEach(row => {
-                this.columns.forEach(col => {
-                    if (!row.cells[col.key]) {
-                        row.cells[col.key] = { size: '', qty: 1 };
-                    }
-                });
-            });
-        },
-
-        cellFor(row, colKey) {
+        // Guarantees a row has a cell object for a given column, so template
+        // bindings can always safely read/write `row.cells[col.key].size`.
+        // Runs via x-init on every row×column cell as it's created, so it
+        // self-heals regardless of how/when that row or column came to exist.
+        ensureCell(row, colKey) {
             if (!row.cells[colKey]) {
                 row.cells[colKey] = { size: '', qty: 1 };
             }
+        },
 
-            return row.cells[colKey];
+        ensureAllCells() {
+            this.rows.forEach(row => {
+                this.columns.forEach(col => this.ensureCell(row, col.key));
+            });
         },
 
         addColumn() {
-            const col = { key: this.newKey('tmp'), id: null, product_id: null, sponsor_logo_id: null, embellishment_id: null, unit_price: 0 };
+            const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0 };
             this.columns.push(col);
             this.ensureAllCells();
             this.sync();
@@ -252,6 +298,7 @@ function orderGrid(config) {
             if (!confirm('Remove this item column from the order?')) return;
             this.columns = this.columns.filter(c => c.key !== colKey);
             this.rows.forEach(row => { delete row.cells[colKey]; });
+            this.sponsorRows = this.sponsorRows.filter(s => s.item_key !== colKey);
             this.sync();
         },
 
@@ -294,8 +341,6 @@ function orderGrid(config) {
                 key: this.newKey('tmp'),
                 id: null,
                 product_id: item.product_id,
-                sponsor_logo_id: null,
-                embellishment_id: null,
                 unit_price: item.price,
             }));
 
@@ -304,15 +349,46 @@ function orderGrid(config) {
                 this.columns.forEach(col => { row.cells[col.key] = { size: '', qty: 1 }; });
             });
 
+            const columnKeys = this.columns.map(c => c.key);
+            this.sponsorRows = this.sponsorRows.filter(s => columnKeys.includes(s.item_key));
+
             this.sync();
         },
 
+        addSponsorRow() {
+            this.sponsorRows.push({
+                key: this.newKey('sp'),
+                id: null,
+                item_key: this.columns[0]?.key || '',
+                sponsor_logo_id: null,
+                embellishment_position_id: null,
+            });
+            this.sync();
+        },
+
+        removeSponsorRow(key) {
+            this.sponsorRows = this.sponsorRows.filter(s => s.key !== key);
+            this.sync();
+        },
+
+        onSponsorLogoChange(sponsor) {
+            const logo = this.sponsorLogos.find(l => l.id == sponsor.sponsor_logo_id);
+            if (logo && !sponsor.embellishment_position_id) {
+                sponsor.embellishment_position_id = logo.position_id;
+            }
+            this.sync();
+        },
+
+        sponsorPrice(sponsor) {
+            const logo = this.sponsorLogos.find(l => l.id == sponsor.sponsor_logo_id);
+            return logo ? parseFloat(logo.price) : 0;
+        },
+
         colUnitCost(col) {
-            const embellishment = this.embellishments.find(e => e.id == col.embellishment_id);
-            const sponsor = this.sponsorLogos.find(s => s.id == col.sponsor_logo_id);
-            return (parseFloat(col.unit_price) || 0)
-                + (embellishment ? parseFloat(embellishment.cost) : 0)
-                + (sponsor ? parseFloat(sponsor.price) : 0);
+            const sponsorsTotal = this.sponsorRows
+                .filter(s => s.item_key === col.key && s.sponsor_logo_id)
+                .reduce((sum, s) => sum + this.sponsorPrice(s), 0);
+            return (parseFloat(col.unit_price) || 0) + sponsorsTotal;
         },
 
         cellTotal(row, colKey) {
@@ -362,7 +438,8 @@ function orderGrid(config) {
             const col = this.columns.find(c => c.key === colKey);
             if (!col) return;
 
-            const cell = this.cellFor(row, colKey);
+            this.ensureCell(row, colKey);
+            const cell = row.cells[colKey];
             if (value === '') {
                 cell.size = '';
                 return;
@@ -402,7 +479,7 @@ function orderGrid(config) {
         },
 
         sync() {
-            this.$wire.$set(this.statePath, JSON.stringify({ columns: this.columns, rows: this.rows }), false);
+            this.$wire.$set(this.statePath, JSON.stringify({ columns: this.columns, rows: this.rows, sponsors: this.sponsorRows }), false);
         },
     };
 }

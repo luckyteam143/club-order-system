@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class OrderItem extends Model
 {
     protected $fillable = [
-        'order_id', 'product_id', 'sponsor_logo_id', 'embellishment_id', 'unit_price', 'sort_order',
+        'order_id', 'product_id', 'unit_price', 'sort_order',
     ];
 
     protected $casts = [
@@ -26,14 +26,9 @@ class OrderItem extends Model
         return $this->belongsTo(Product::class);
     }
 
-    public function sponsorLogo(): BelongsTo
+    public function sponsors(): HasMany
     {
-        return $this->belongsTo(SponsorLogo::class);
-    }
-
-    public function embellishment(): BelongsTo
-    {
-        return $this->belongsTo(Embellishment::class);
+        return $this->hasMany(OrderItemSponsor::class);
     }
 
     public function cells(): HasMany
@@ -43,8 +38,6 @@ class OrderItem extends Model
 
     public function unitCost(): float
     {
-        return (float) $this->unit_price
-            + (float) ($this->embellishment?->cost ?? 0)
-            + (float) ($this->sponsorLogo?->price ?? 0);
+        return (float) $this->unit_price + (float) $this->sponsors->sum('price');
     }
 }
