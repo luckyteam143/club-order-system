@@ -143,10 +143,21 @@
         </table>
     </div>
 
-    <button type="button" @click="addRow()"
-        class="fi-btn mt-2 inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
-        + Add Row
-    </button>
+    <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" @click="addRow()"
+            class="fi-btn inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+            + Add Row
+        </button>
+
+        <div class="inline-flex items-center gap-1">
+            <input type="number" min="1" max="500" x-model.number="bulkAddCount"
+                class="fi-input w-16 rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+            <button type="button" @click="addRows(bulkAddCount)"
+                class="fi-btn inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+                + Add Rows
+            </button>
+        </div>
+    </div>
 
     <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
         <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Sponsor Logos</h4>
@@ -227,6 +238,7 @@ function orderGrid(config) {
         columns: [],
         rows: [],
         sponsorRows: [],
+        bulkAddCount: 5,
 
         init() {
             this.columns = (config.initial.columns || []).map(c => ({ ...c }));
@@ -366,11 +378,19 @@ function orderGrid(config) {
             this.syncNow();
         },
 
-        addRow() {
+        addRow(shouldSync = true) {
             const row = { key: this.newKey('tmp'), id: null, player_name: '', number: '', initials: '', notes: '', cells: {} };
             this.columns.forEach(col => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
             this.rows.push(row);
-            this.sync();
+            if (shouldSync) this.sync();
+        },
+
+        addRows(count) {
+            const n = Math.max(1, Math.min(500, parseInt(count) || 1));
+            for (let i = 0; i < n; i++) {
+                this.addRow(false);
+            }
+            this.syncNow();
         },
 
         removeRow(rowKey) {
