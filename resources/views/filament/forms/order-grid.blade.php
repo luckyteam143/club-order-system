@@ -470,24 +470,33 @@ function orderGrid(config) {
             this.sync();
         },
 
+        // Forces every row's DOM to be fully torn down and rebuilt from
+        // scratch on the next tick, instead of letting Alpine try to
+        // incrementally reconcile the list in place. Used for remove/
+        // duplicate specifically: those were observed acting on the wrong
+        // row in the browser (deleting a just-duplicated row removed a
+        // different one), which only a stale DOM-to-data binding can
+        // explain. This brute-forces correctness at the cost of a brief
+        // flicker, rather than continuing to guess at Alpine's internal
+        // list-diffing without being able to debug it live.
+        replaceRows(newRows) {
+            this.rows = [];
+            this.$nextTick(() => {
+                this.rows = newRows;
+                this.sync();
+            });
+        },
+
         removeRow(rowKey) {
             const row = this.rows.find(r => r.key === rowKey);
             const hasContent = row && (row.player_name || row.number || row.initials || Object.values(row.cells).some(c => c.size));
             if (hasContent && !confirm('Remove this player row?')) return;
-            this.rows = this.rows.filter(r => r.key !== rowKey);
-            this.sync();
+            this.replaceRows(this.rows.filter(r => r.key !== rowKey));
         },
 
-        // Inserts a copy of a row (same player details and item sizes)
-        // directly below the source row — ready to tweak (e.g. same
-        // family/teammate ordering the same kit in a different size).
-        //
-        // Appended to the end rather than inserted right after the source:
-        // inserting mid-array (via splice, or via a full reassigned array)
-        // leaves this template's row-tracking out of sync with which DOM row
-        // is bound to which array item — confirmed by duplicating/removing
-        // acting on the wrong row. Appending is the one approach that's held
-        // up reliably, so correctness wins over exact position here.
+        // Appends a copy of a row (same player details and item sizes) to
+        // the end of the list — ready to tweak (e.g. same family/teammate
+        // ordering the same kit in a different size).
         duplicateRow(rowKey) {
             const source = this.rows.find(r => r.key === rowKey);
             if (!source) return;
@@ -507,8 +516,7 @@ function orderGrid(config) {
                 copy.cells[col.key] = { size: src ? src.size : '', qty: src ? src.qty : 1, invalid: false };
             });
 
-            this.rows.push(copy);
-            this.sync();
+            this.replaceRows([...this.rows, copy]);
         },
 
         loadPackageItems() {
