@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\OrderResource\Pages;
+use App\Models\Embellishment;
 use App\Models\EmbellishmentPosition;
 use App\Models\Order;
 use App\Models\Package;
@@ -82,10 +83,11 @@ class OrderResource extends Resource
                 ->viewData([
                     'products'               => self::productsCatalogForGrid(),
                     'sponsorLogos'           => self::sponsorLogosCatalogForGrid(),
+                    'embellishments'         => self::embellishmentsCatalogForGrid(),
                     'embellishmentPositions' => self::embellishmentPositionsCatalogForGrid(),
                     'packages'               => self::packagesCatalogForGrid(),
                 ])
-                ->default(json_encode(['columns' => [], 'rows' => [], 'sponsors' => []]))
+                ->default(json_encode(['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => []]))
                 ->dehydrateStateUsing(fn ($state) => is_string($state) ? $state : json_encode($state))
                 ->columnSpanFull(),
 
@@ -212,6 +214,19 @@ class OrderResource extends Resource
             ->map(fn (EmbellishmentPosition $p) => [
                 'id'   => $p->id,
                 'name' => $p->name,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private static function embellishmentsCatalogForGrid(): array
+    {
+        return Embellishment::orderBy('name')->get()
+            ->map(fn (Embellishment $e) => [
+                'id'          => $e->id,
+                'name'        => $e->name,
+                'cost'        => (float) $e->cost,
+                'position_id' => $e->embellishment_position_id,
             ])
             ->values()
             ->all();

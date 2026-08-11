@@ -2,10 +2,12 @@
 
 namespace App\Filament\Resources\OrderResource\Concerns;
 
+use App\Models\Embellishment;
 use App\Models\EmbellishmentPosition;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderItemCell;
+use App\Models\OrderItemEmbellishment;
 use App\Models\OrderItemSponsor;
 use App\Models\SponsorLogo;
 use Illuminate\Support\Facades\DB;
@@ -17,10 +19,15 @@ trait PersistsOrderGrid
     protected function buildGridState(?Order $order): array
     {
         if (! $order || ! $order->exists) {
-            return ['columns' => [], 'rows' => [], 'sponsors' => []];
+            return ['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => []];
         }
 
-        $order->loadMissing(['orderItems.cells', 'orderItems.sponsors', 'playerRows.itemCells']);
+        $order->loadMissing([
+            'orderItems.cells',
+            'orderItems.sponsors',
+            'orderItems.embellishments',
+            'playerRows.itemCells',
+        ]);
 
         $columns = $order->orderItems->map(fn (OrderItem $item) => [
             'key'         => 'i'.$item->id,
@@ -35,6 +42,14 @@ trait PersistsOrderGrid
             'item_key'                  => 'i'.$item->id,
             'sponsor_logo_id'           => $sponsor->sponsor_logo_id,
             'embellishment_position_id' => $sponsor->embellishment_position_id,
+        ]))->values()->all();
+
+        $embellishments = $order->orderItems->flatMap(fn (OrderItem $item) => $item->embellishments->map(fn ($e) => [
+            'key'                       => 'em'.$e->id,
+            'id'                        => $e->id,
+            'item_key'                  => 'i'.$item->id,
+            'embellishment_id'          => $e->embellishment_id,
+            'embellishment_position_id' => $e->embellishment_position_id,
         ]))->values()->all();
 
         $rows = $order->playerRows->map(function ($row) {
@@ -54,7 +69,7 @@ trait PersistsOrderGrid
             ];
         })->values()->all();
 
-        return ['columns' => $columns, 'rows' => $rows, 'sponsors' => $sponsors];
+        return ['columns' => $columns, 'rows' => $rows, 'sponsors' => $sponsors, 'embellishments' => $embellishments];
     }
 
     protected function persistGridState(Order $order, array $state): void
@@ -63,6 +78,7 @@ trait PersistsOrderGrid
             $columns = collect($state['columns'] ?? []);
             $rows = collect($state['rows'] ?? []);
             $sponsors = collect($state['sponsors'] ?? []);
+            $embellishments = collect($state['embellishments'] ?? []);
 
             $columnKeyToId = [];
             $keptItemIds = [];
@@ -108,17 +124,13 @@ trait PersistsOrderGrid
                     continue;
                 }
 
-                $price = (float) $logo->price;
-                $positionId = (int) ($sponsor['embellishment_position_id'] ?? 0);
-                if ($positionId > 0 && ! EmbellishmentPosition::whereKey($positionId)->exists()) {
-                    $positionId = 0;
-                }
+                $positionId = $this->resolvePositionId($sponsor['embellishment_position_id'] ?? null);
 
                 $attrs = [
                     'order_item_id'              => $itemId,
                     'sponsor_logo_id'            => $sponsorLogoId,
-                    'embellishment_position_id'  => $positionId > 0 ? $positionId : null,
-                    'price'                      => $price,
+                    'embellishment_position_id'  => $positionId,
+                    'price'                      => (float) $logo->price,
                 ];
 
                 $id = $sponsor['id'] ?? null;
@@ -135,7 +147,44 @@ trait PersistsOrderGrid
                 ->whereNotIn('id', $keptSponsorIds ?: [0])
                 ->delete();
 
-            $items = $order->orderItems()->with('sponsors')->whereIn('id', $keptItemIds ?: [0])->get()->keyBy('id');
+            $keptEmbellishmentIds = [];
+
+            foreach ($embellishments as $embellishment) {
+                $itemId = $columnKeyToId[$embellishment['item_key'] ?? null] ?? null;
+                $embellishmentId = $embellishment['embellishment_id'] ?? null;
+                if (! $itemId || blank($embellishmentId) || (int) $embellishmentId <= 0) {
+                    continue;
+                }
+
+                $catalogEmbellishment = Embellishment::find($embellishmentId);
+                if (! $catalogEmbellishment) {
+                    continue;
+                }
+
+                $positionId = $this->resolvePositionId($embellishment['embellishment_position_id'] ?? null);
+
+                $attrs = [
+                    'order_item_id'              => $itemId,
+                    'embellishment_id'           => $embellishmentId,
+                    'embellishment_position_id'  => $positionId,
+                    'price'                      => (float) $catalogEmbellishment->cost,
+                ];
+
+                $id = $embellishment['id'] ?? null;
+                if ($id && OrderItemEmbellishment::whereKey($id)->whereIn('order_item_id', $keptItemIds)->exists()) {
+                    OrderItemEmbellishment::whereKey($id)->update($attrs);
+                } else {
+                    $id = OrderItemEmbellishment::create($attrs)->id;
+                }
+
+                $keptEmbellishmentIds[] = $id;
+            }
+
+            OrderItemEmbellishment::whereIn('order_item_id', $keptItemIds ?: [0])
+                ->whereNotIn('id', $keptEmbellishmentIds ?: [0])
+                ->delete();
+
+            $items = $order->orderItems()->with(['sponsors', 'embellishments'])->whereIn('id', $keptItemIds ?: [0])->get()->keyBy('id');
 
             $keptRowIds = [];
 
@@ -197,5 +246,21 @@ trait PersistsOrderGrid
 
             $order->recalculateTotal();
         });
+    }
+
+    /**
+     * Coerces a client-supplied position id to a real, existing
+     * EmbellishmentPosition id, or null if it's blank/invalid — so a stale
+     * or empty id can never trip a foreign key constraint.
+     */
+    private function resolvePositionId(mixed $rawPositionId): ?int
+    {
+        $positionId = (int) ($rawPositionId ?? 0);
+
+        if ($positionId <= 0 || ! EmbellishmentPosition::whereKey($positionId)->exists()) {
+            return null;
+        }
+
+        return $positionId;
     }
 }

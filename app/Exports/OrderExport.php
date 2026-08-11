@@ -22,7 +22,7 @@ class OrderExport implements FromCollection, WithHeadings, WithStyles, WithTitle
 
     public function headings(): array
     {
-        return ['#', 'Player Name', 'Number', 'Initials', 'Item', 'Sponsor Logos', 'Size', 'Qty', 'Unit Price (CAD)', 'Line Total (CAD)', 'Notes'];
+        return ['#', 'Player Name', 'Number', 'Initials', 'Item', 'Sponsor Logos', 'Embellishments', 'Size', 'Qty', 'Unit Price (CAD)', 'Line Total (CAD)', 'Notes'];
     }
 
     public function collection(): Collection
@@ -32,6 +32,8 @@ class OrderExport implements FromCollection, WithHeadings, WithStyles, WithTitle
             'playerRows.itemCells.orderItem.product',
             'playerRows.itemCells.orderItem.sponsors.sponsorLogo',
             'playerRows.itemCells.orderItem.sponsors.position',
+            'playerRows.itemCells.orderItem.embellishments.embellishment',
+            'playerRows.itemCells.orderItem.embellishments.position',
         );
 
         foreach ($this->order->playerRows as $player) {
@@ -39,6 +41,9 @@ class OrderExport implements FromCollection, WithHeadings, WithStyles, WithTitle
                 $item = $cell->orderItem;
                 $sponsors = $item?->sponsors
                     ->map(fn ($s) => $s->sponsorLogo?->name . ($s->position ? ' (' . $s->position->name . ')' : ''))
+                    ->implode(', ');
+                $embellishments = $item?->embellishments
+                    ->map(fn ($e) => $e->embellishment?->name . ($e->position ? ' (' . $e->position->name . ')' : ''))
                     ->implode(', ');
 
                 $rows->push([
@@ -48,6 +53,7 @@ class OrderExport implements FromCollection, WithHeadings, WithStyles, WithTitle
                     $player->initials,
                     $item?->product?->name,
                     $sponsors,
+                    $embellishments,
                     $cell->size,
                     $cell->qty,
                     $item?->unit_price,
@@ -58,7 +64,7 @@ class OrderExport implements FromCollection, WithHeadings, WithStyles, WithTitle
         }
 
         $rows->push([]);
-        $rows->push(['', '', '', '', '', '', '', '', 'ORDER TOTAL', $this->order->total, '']);
+        $rows->push(['', '', '', '', '', '', '', '', '', 'ORDER TOTAL', $this->order->total, '']);
 
         return $rows;
     }

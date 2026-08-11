@@ -1,5 +1,5 @@
 @php
-    $initial = json_decode($getState() ?: '{}', true) ?: ['columns' => [], 'rows' => [], 'sponsors' => []];
+    $initial = json_decode($getState() ?: '{}', true) ?: ['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => []];
 @endphp
 
 <div
@@ -8,6 +8,7 @@
         initial: @js($initial),
         products: @js($products),
         sponsorLogos: @js($sponsorLogos),
+        embellishments: @js($embellishments),
         embellishmentPositions: @js($embellishmentPositions),
         packages: @js($packages),
     })"
@@ -78,7 +79,7 @@
                                 @keydown.down.prevent="navigate($event, 'down')"
                                 @keydown.up.prevent="navigate($event, 'up')"
                                 @paste="onPaste($event, rowIndex, 'player_name')"
-                                @input="sync()"
+                                @input="row.player_name = row.player_name.toUpperCase(); sync()"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                         </td>
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
@@ -98,7 +99,7 @@
                                 @keydown.down.prevent="navigate($event, 'down')"
                                 @keydown.up.prevent="navigate($event, 'up')"
                                 @paste="onPaste($event, rowIndex, 'initials')"
-                                @input="sync()"
+                                @input="row.initials = row.initials.toUpperCase(); sync()"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                         </td>
 
@@ -236,6 +237,73 @@
             + Add Sponsor Logo
         </button>
     </div>
+
+    <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Embellishments</h4>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            Add a name/number-style embellishment to any item above, choose which position it prints at. An item can carry more than one.
+        </p>
+
+        <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700" x-show="columns.length">
+            <table class="w-full text-sm border-collapse">
+                <thead class="bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[12rem]">Item</th>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[12rem]">Embellishment</th>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[10rem]">Position</th>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-right font-medium w-20">Total Cost</th>
+                        <th class="border-b border-gray-200 dark:border-gray-700 px-2 py-2 w-10"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="embellishment in embellishmentRows" :key="embellishment.key">
+                        <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                                <select x-model="embellishment.item_key" @change="syncNow()"
+                                    x-init="$nextTick(() => { $el.value = embellishment.item_key || '' })"
+                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    <option value="">Select item…</option>
+                                    <template x-for="col in columns" :key="col.key">
+                                        <option :value="col.key" x-text="productName(col.product_id) || 'Untitled item'"></option>
+                                    </template>
+                                </select>
+                            </td>
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                                <select x-model.number="embellishment.embellishment_id" @change="onEmbellishmentChange(embellishment)"
+                                    x-init="$nextTick(() => { $el.value = embellishment.embellishment_id || '' })"
+                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    <option value="">Select embellishment…</option>
+                                    <template x-for="e in embellishments" :key="e.id">
+                                        <option :value="e.id" x-text="e.name + ' ($' + e.cost.toFixed(2) + ')'"></option>
+                                    </template>
+                                </select>
+                            </td>
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                                <select x-model.number="embellishment.embellishment_position_id" @change="syncNow()"
+                                    x-init="$nextTick(() => { $el.value = embellishment.embellishment_position_id || '' })"
+                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    <option value="">—</option>
+                                    <template x-for="pos in embellishmentPositions" :key="pos.id">
+                                        <option :value="pos.id" x-text="pos.name"></option>
+                                    </template>
+                                </select>
+                            </td>
+                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1 text-right tabular-nums" x-text="'$' + embellishmentPrice(embellishment).toFixed(2)"></td>
+                            <td class="border-b border-gray-100 dark:border-gray-800 p-1 text-center">
+                                <button type="button" @click="removeEmbellishmentRow(embellishment.key)" class="text-gray-400 hover:text-danger-600" title="Remove">🗑</button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-2" x-show="!columns.length">Add an item column first, then attach embellishments to it here.</p>
+
+        <button type="button" x-show="columns.length" @click="addEmbellishmentRow()"
+            class="fi-btn mt-2 inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
+            + Add Embellishment
+        </button>
+    </div>
 </div>
 
 <script>
@@ -244,17 +312,20 @@ function orderGrid(config) {
         statePath: config.statePath,
         products: config.products,
         sponsorLogos: config.sponsorLogos,
+        embellishments: config.embellishments,
         embellishmentPositions: config.embellishmentPositions,
         packages: config.packages,
         columns: [],
         rows: [],
         sponsorRows: [],
+        embellishmentRows: [],
         bulkAddCount: 5,
 
         init() {
             this.columns = (config.initial.columns || []).map(c => ({ ...c }));
             this.rows = (config.initial.rows || []).map(r => ({ ...r, cells: { ...(r.cells || {}) } }));
             this.sponsorRows = (config.initial.sponsors || []).map(s => ({ ...s }));
+            this.embellishmentRows = (config.initial.embellishments || []).map(e => ({ ...e }));
 
             this.ensureAllCells();
 
@@ -371,6 +442,7 @@ function orderGrid(config) {
             this.columns = this.columns.filter(c => c.key !== colKey);
             this.rows.forEach(row => { delete row.cells[colKey]; });
             this.sponsorRows = this.sponsorRows.filter(s => s.item_key !== colKey);
+            this.embellishmentRows = this.embellishmentRows.filter(e => e.item_key !== colKey);
             this.syncNow();
         },
 
@@ -458,6 +530,7 @@ function orderGrid(config) {
 
             const columnKeys = this.columns.map(c => c.key);
             this.sponsorRows = this.sponsorRows.filter(s => columnKeys.includes(s.item_key));
+            this.embellishmentRows = this.embellishmentRows.filter(e => columnKeys.includes(e.item_key));
 
             this.syncNow();
         },
@@ -491,11 +564,43 @@ function orderGrid(config) {
             return logo ? parseFloat(logo.price) : 0;
         },
 
+        addEmbellishmentRow() {
+            this.embellishmentRows.push({
+                key: this.newKey('em'),
+                id: null,
+                item_key: this.columns[0]?.key || '',
+                embellishment_id: null,
+                embellishment_position_id: null,
+            });
+            this.syncNow();
+        },
+
+        removeEmbellishmentRow(key) {
+            this.embellishmentRows = this.embellishmentRows.filter(e => e.key !== key);
+            this.syncNow();
+        },
+
+        onEmbellishmentChange(embellishment) {
+            const catalogEntry = this.embellishments.find(e => e.id == embellishment.embellishment_id);
+            if (catalogEntry && !embellishment.embellishment_position_id) {
+                embellishment.embellishment_position_id = catalogEntry.position_id;
+            }
+            this.syncNow();
+        },
+
+        embellishmentPrice(embellishment) {
+            const catalogEntry = this.embellishments.find(e => e.id == embellishment.embellishment_id);
+            return catalogEntry ? parseFloat(catalogEntry.cost) : 0;
+        },
+
         colUnitCost(col) {
             const sponsorsTotal = this.sponsorRows
                 .filter(s => s.item_key === col.key && s.sponsor_logo_id)
                 .reduce((sum, s) => sum + this.sponsorPrice(s), 0);
-            return (parseFloat(col.unit_price) || 0) + sponsorsTotal;
+            const embellishmentsTotal = this.embellishmentRows
+                .filter(e => e.item_key === col.key && e.embellishment_id)
+                .reduce((sum, e) => sum + this.embellishmentPrice(e), 0);
+            return (parseFloat(col.unit_price) || 0) + sponsorsTotal + embellishmentsTotal;
         },
 
         cellTotal(row, colKey) {
@@ -551,7 +656,12 @@ function orderGrid(config) {
             const row = this.rows[rowIndex];
             if (!row) return;
 
-            if (['player_name', 'number', 'initials', 'notes'].includes(colKey)) {
+            if (['player_name', 'initials'].includes(colKey)) {
+                row[colKey] = value.toUpperCase();
+                return;
+            }
+
+            if (['number', 'notes'].includes(colKey)) {
                 row[colKey] = value;
                 return;
             }
@@ -604,8 +714,17 @@ function orderGrid(config) {
         // so the grid's data is durably saved server-side within ~1s of the
         // last edit, not just held in the browser waiting for some other
         // action (like the Save button) to happen to bundle it along.
+        serializeState() {
+            return JSON.stringify({
+                columns: this.columns,
+                rows: this.rows,
+                sponsors: this.sponsorRows,
+                embellishments: this.embellishmentRows,
+            });
+        },
+
         sync() {
-            const json = JSON.stringify({ columns: this.columns, rows: this.rows, sponsors: this.sponsorRows });
+            const json = this.serializeState();
             this.$wire.$set(this.statePath, json, false);
 
             clearTimeout(this._flushTimer);
@@ -616,13 +735,12 @@ function orderGrid(config) {
 
         // Same as sync(), but flushes to the server immediately instead of
         // waiting out the debounce — used for infrequent, deliberate actions
-        // (adding/removing columns, rows, sponsor logos; picking a product or
-        // sponsor logo) where there's no reason to wait and every reason to
-        // want it durably saved right away.
+        // (adding/removing columns, rows, sponsor logos, embellishments;
+        // picking a product/sponsor logo/embellishment) where there's no
+        // reason to wait and every reason to want it durably saved right away.
         syncNow() {
             clearTimeout(this._flushTimer);
-            const json = JSON.stringify({ columns: this.columns, rows: this.rows, sponsors: this.sponsorRows });
-            this.$wire.$set(this.statePath, json, true);
+            this.$wire.$set(this.statePath, this.serializeState(), true);
         },
     };
 }

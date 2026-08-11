@@ -31,6 +31,11 @@ class OrderItem extends Model
         return $this->hasMany(OrderItemSponsor::class);
     }
 
+    public function embellishments(): HasMany
+    {
+        return $this->hasMany(OrderItemEmbellishment::class);
+    }
+
     public function cells(): HasMany
     {
         return $this->hasMany(OrderItemCell::class);
@@ -38,6 +43,8 @@ class OrderItem extends Model
 
     public function unitCost(): float
     {
-        return (float) $this->unit_price + (float) $this->sponsors->sum('price');
+        return (float) $this->unit_price
+            + (float) $this->sponsors->sum('price')
+            + (float) $this->embellishments->sum('price');
     }
 }
