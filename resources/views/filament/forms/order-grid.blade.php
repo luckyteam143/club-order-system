@@ -74,7 +74,9 @@
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                             <input type="text" x-model="row.player_name" placeholder="Player name"
                                 :data-row="rowIndex" data-col="player_name"
-                                @keydown.enter.prevent="moveDown($event)"
+                                @keydown.enter.prevent="navigate($event, 'down')"
+                                @keydown.down.prevent="navigate($event, 'down')"
+                                @keydown.up.prevent="navigate($event, 'up')"
                                 @paste="onPaste($event, rowIndex, 'player_name')"
                                 @input="sync()"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
@@ -82,7 +84,9 @@
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                             <input type="text" x-model="row.number" placeholder="#"
                                 :data-row="rowIndex" data-col="number"
-                                @keydown.enter.prevent="moveDown($event)"
+                                @keydown.enter.prevent="navigate($event, 'down')"
+                                @keydown.down.prevent="navigate($event, 'down')"
+                                @keydown.up.prevent="navigate($event, 'up')"
                                 @paste="onPaste($event, rowIndex, 'number')"
                                 @input="sync()"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
@@ -90,7 +94,9 @@
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                             <input type="text" x-model="row.initials" placeholder="Init."
                                 :data-row="rowIndex" data-col="initials"
-                                @keydown.enter.prevent="moveDown($event)"
+                                @keydown.enter.prevent="navigate($event, 'down')"
+                                @keydown.down.prevent="navigate($event, 'down')"
+                                @keydown.up.prevent="navigate($event, 'up')"
                                 @paste="onPaste($event, rowIndex, 'initials')"
                                 @input="sync()"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
@@ -106,7 +112,9 @@
                                     :class="(row.cells[col.key] && row.cells[col.key].invalid)
                                         ? 'fi-input w-full rounded-md text-sm border-danger-500 bg-danger-50 dark:bg-danger-950 focus:border-danger-500 focus:ring-danger-500'
                                         : 'fi-input w-full rounded-md text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-900'"
-                                    @keydown.enter.prevent="moveDown($event)"
+                                    @keydown.enter.prevent="navigate($event, 'down')"
+                                    @keydown.down.prevent="navigate($event, 'down')"
+                                    @keydown.up.prevent="navigate($event, 'up')"
                                     @paste="onPaste($event, rowIndex, col.key)"
                                     @input="onSizeTyping($event, row, col)"
                                     @change="onSizeInput($event, row, col)">
@@ -121,7 +129,9 @@
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                             <input type="text" x-model="row.notes" placeholder="Notes"
                                 :data-row="rowIndex" data-col="notes"
-                                @keydown.enter.prevent="moveDown($event)"
+                                @keydown.enter.prevent="navigate($event, 'down')"
+                                @keydown.down.prevent="navigate($event, 'down')"
+                                @keydown.up.prevent="navigate($event, 'up')"
                                 @paste="onPaste($event, rowIndex, 'notes')"
                                 @input="sync()"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
@@ -480,18 +490,32 @@ function orderGrid(config) {
             return ['player_name', 'number', 'initials', ...this.columns.map(c => c.key), 'notes'];
         },
 
-        moveDown(event) {
+        // Excel-style vertical navigation: Enter/ArrowDown move to the same
+        // column in the next row (adding one if you're on the last row),
+        // ArrowUp moves to the previous row. Left/right movement is left to
+        // the browser's native Tab/Shift+Tab and text-cursor behavior.
+        navigate(event, direction) {
             const el = event.target;
             const row = parseInt(el.dataset.row);
             const col = el.dataset.col;
+            const targetRow = direction === 'down' ? row + 1 : row - 1;
 
-            if (row === this.rows.length - 1) {
+            if (targetRow < 0) {
+                return;
+            }
+
+            if (targetRow >= this.rows.length) {
+                if (direction !== 'down') {
+                    return;
+                }
                 this.addRow();
             }
 
             this.$nextTick(() => {
-                const next = this.$el.querySelector(`[data-row="${row + 1}"][data-col="${CSS.escape(col)}"]`);
-                if (next) next.focus();
+                const next = this.$el.querySelector(`[data-row="${targetRow}"][data-col="${CSS.escape(col)}"]`);
+                if (!next) return;
+                next.focus();
+                if (typeof next.select === 'function') next.select();
             });
         },
 
