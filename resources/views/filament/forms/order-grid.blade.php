@@ -3,6 +3,8 @@
 @endphp
 
 <div
+    wire:key="order-item-grid"
+    wire:ignore
     x-data="orderGrid({
         statePath: @js($getStatePath()),
         initial: @js($initial),
@@ -717,11 +719,6 @@ function orderGrid(config) {
             this.sync();
         },
 
-        // Updates the Livewire component's local state immediately (no request),
-        // AND schedules a real, debounced flush to the server shortly after —
-        // so the grid's data is durably saved server-side within ~1s of the
-        // last edit, not just held in the browser waiting for some other
-        // action (like the Save button) to happen to bundle it along.
         serializeState() {
             return JSON.stringify({
                 columns: this.columns,
@@ -731,26 +728,20 @@ function orderGrid(config) {
             });
         },
 
-        // Updates the Livewire component's local state immediately (no
-        // request — this is what the Save button reads when clicked, so it
-        // always reflects the latest edit regardless of timing), and
-        // schedules a real, debounced flush to the server shortly after so
-        // the data is durably stored even before Save is clicked.
+        // Updates the Livewire component's local state only — no request.
+        // Livewire still picks this up correctly whenever the real Save/
+        // Submit Order action fires, since it diffs the component's full
+        // current state against the server's last snapshot at that point,
+        // not just properties explicitly marked dirty beforehand.
         //
-        // Deliberately never fires a *live* (immediate) request from inside
-        // the grid: an immediate request re-renders and lets Livewire morph
-        // the DOM while the user may still be interacting with it, which can
-        // destroy/recreate the exact Alpine scope a selection handler (or a
-        // still-pending x-init $nextTick callback) is referencing —
-        // that's what was behind the "embellishment is not defined" crash.
+        // Deliberately never fires a request from inside the grid itself:
+        // the grid's root element is wire:ignore'd (see the root <div>) so
+        // Livewire never re-renders/morphs it out from under an in-progress
+        // interaction, but an explicit background flush would still cause a
+        // real round trip elsewhere on the page — not worth the risk for a
+        // "durability" gain Save already provides.
         sync() {
-            const json = this.serializeState();
-            this.$wire.$set(this.statePath, json, false);
-
-            clearTimeout(this._flushTimer);
-            this._flushTimer = setTimeout(() => {
-                this.$wire.$set(this.statePath, json, true);
-            }, 800);
+            this.$wire.$set(this.statePath, this.serializeState(), false);
         },
     };
 }
