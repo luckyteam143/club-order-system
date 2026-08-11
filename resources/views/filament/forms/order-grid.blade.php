@@ -192,7 +192,7 @@
                     <template x-for="sponsor in sponsorRows" :key="sponsor.key">
                         <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model="sponsor.item_key" @change="syncNow()"
+                                <select x-model="sponsor.item_key" @change="sync()"
                                     x-init="$nextTick(() => { $el.value = sponsor.item_key || '' })"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select item…</option>
@@ -212,7 +212,7 @@
                                 </select>
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model.number="sponsor.embellishment_position_id" @change="syncNow()"
+                                <select x-model.number="sponsor.embellishment_position_id" @change="sync()"
                                     x-init="$nextTick(() => { $el.value = sponsor.embellishment_position_id || '' })"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">—</option>
@@ -259,7 +259,7 @@
                     <template x-for="embellishment in embellishmentRows" :key="embellishment.key">
                         <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model="embellishment.item_key" @change="syncNow()"
+                                <select x-model="embellishment.item_key" @change="sync()"
                                     x-init="$nextTick(() => { $el.value = embellishment.item_key || '' })"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select item…</option>
@@ -279,7 +279,7 @@
                                 </select>
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model.number="embellishment.embellishment_position_id" @change="syncNow()"
+                                <select x-model.number="embellishment.embellishment_position_id" @change="sync()"
                                     x-init="$nextTick(() => { $el.value = embellishment.embellishment_position_id || '' })"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">—</option>
@@ -434,7 +434,7 @@ function orderGrid(config) {
             const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0 };
             this.columns.push(col);
             this.ensureAllCells();
-            this.syncNow();
+            this.sync();
         },
 
         removeColumn(colKey) {
@@ -443,7 +443,7 @@ function orderGrid(config) {
             this.rows.forEach(row => { delete row.cells[colKey]; });
             this.sponsorRows = this.sponsorRows.filter(s => s.item_key !== colKey);
             this.embellishmentRows = this.embellishmentRows.filter(e => e.item_key !== colKey);
-            this.syncNow();
+            this.sync();
         },
 
         onProductInput(event, col) {
@@ -458,7 +458,7 @@ function orderGrid(config) {
             const product = this.products.find(p => p.id == col.product_id);
             col.unit_price = product ? product.price : 0;
             this.rows.forEach(row => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
-            this.syncNow();
+            this.sync();
         },
 
         addRow(shouldSync = true) {
@@ -473,7 +473,7 @@ function orderGrid(config) {
             for (let i = 0; i < n; i++) {
                 this.addRow(false);
             }
-            this.syncNow();
+            this.sync();
         },
 
         removeRow(rowKey) {
@@ -481,7 +481,7 @@ function orderGrid(config) {
             const hasContent = row && (row.player_name || row.number || row.initials || Object.values(row.cells).some(c => c.size));
             if (hasContent && !confirm('Remove this player row?')) return;
             this.rows = this.rows.filter(r => r.key !== rowKey);
-            this.syncNow();
+            this.sync();
         },
 
         // Appends a copy of a row (same player details and item sizes) to the
@@ -510,7 +510,7 @@ function orderGrid(config) {
             });
 
             this.rows.push(copy);
-            this.syncNow();
+            this.sync();
         },
 
         loadPackageItems() {
@@ -534,7 +534,7 @@ function orderGrid(config) {
             this.sponsorRows = this.sponsorRows.filter(s => columnKeys.includes(s.item_key));
             this.embellishmentRows = this.embellishmentRows.filter(e => columnKeys.includes(e.item_key));
 
-            this.syncNow();
+            this.sync();
         },
 
         addSponsorRow() {
@@ -545,12 +545,12 @@ function orderGrid(config) {
                 sponsor_logo_id: null,
                 embellishment_position_id: null,
             });
-            this.syncNow();
+            this.sync();
         },
 
         removeSponsorRow(key) {
             this.sponsorRows = this.sponsorRows.filter(s => s.key !== key);
-            this.syncNow();
+            this.sync();
         },
 
         onSponsorLogoChange(sponsor) {
@@ -558,7 +558,7 @@ function orderGrid(config) {
             if (logo && !sponsor.embellishment_position_id) {
                 sponsor.embellishment_position_id = logo.position_id;
             }
-            this.syncNow();
+            this.sync();
         },
 
         sponsorPrice(sponsor) {
@@ -574,12 +574,12 @@ function orderGrid(config) {
                 embellishment_id: null,
                 embellishment_position_id: null,
             });
-            this.syncNow();
+            this.sync();
         },
 
         removeEmbellishmentRow(key) {
             this.embellishmentRows = this.embellishmentRows.filter(e => e.key !== key);
-            this.syncNow();
+            this.sync();
         },
 
         onEmbellishmentChange(embellishment) {
@@ -587,7 +587,7 @@ function orderGrid(config) {
             if (catalogEntry && !embellishment.embellishment_position_id) {
                 embellishment.embellishment_position_id = catalogEntry.position_id;
             }
-            this.syncNow();
+            this.sync();
         },
 
         embellishmentPrice(embellishment) {
@@ -725,6 +725,18 @@ function orderGrid(config) {
             });
         },
 
+        // Updates the Livewire component's local state immediately (no
+        // request — this is what the Save button reads when clicked, so it
+        // always reflects the latest edit regardless of timing), and
+        // schedules a real, debounced flush to the server shortly after so
+        // the data is durably stored even before Save is clicked.
+        //
+        // Deliberately never fires a *live* (immediate) request from inside
+        // the grid: an immediate request re-renders and lets Livewire morph
+        // the DOM while the user may still be interacting with it, which can
+        // destroy/recreate the exact Alpine scope a selection handler (or a
+        // still-pending x-init $nextTick callback) is referencing —
+        // that's what was behind the "embellishment is not defined" crash.
         sync() {
             const json = this.serializeState();
             this.$wire.$set(this.statePath, json, false);
@@ -733,16 +745,6 @@ function orderGrid(config) {
             this._flushTimer = setTimeout(() => {
                 this.$wire.$set(this.statePath, json, true);
             }, 800);
-        },
-
-        // Same as sync(), but flushes to the server immediately instead of
-        // waiting out the debounce — used for infrequent, deliberate actions
-        // (adding/removing columns, rows, sponsor logos, embellishments;
-        // picking a product/sponsor logo/embellishment) where there's no
-        // reason to wait and every reason to want it durably saved right away.
-        syncNow() {
-            clearTimeout(this._flushTimer);
-            this.$wire.$set(this.statePath, this.serializeState(), true);
         },
     };
 }
