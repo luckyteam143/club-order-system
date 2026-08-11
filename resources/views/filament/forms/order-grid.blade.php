@@ -103,10 +103,13 @@
                                     :value="row.cells[col.key] ? row.cells[col.key].size : ''"
                                     :data-row="rowIndex" :data-col="col.key"
                                     placeholder="Size…"
+                                    :class="(row.cells[col.key] && row.cells[col.key].invalid)
+                                        ? 'fi-input w-full rounded-md text-sm border-danger-500 bg-danger-50 dark:bg-danger-950 focus:border-danger-500 focus:ring-danger-500'
+                                        : 'fi-input w-full rounded-md text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-900'"
                                     @keydown.enter.prevent="moveDown($event)"
                                     @paste="onPaste($event, rowIndex, col.key)"
-                                    @change="onSizeInput($event, row, col)"
-                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    @input="onSizeTyping($event, row, col)"
+                                    @change="onSizeInput($event, row, col)">
                                 <datalist :id="'order-grid-sizes-' + col.key">
                                     <template x-for="size in productSizes(col)" :key="size">
                                         <option :value="size"></option>
@@ -166,7 +169,7 @@
                     <template x-for="sponsor in sponsorRows" :key="sponsor.key">
                         <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model="sponsor.item_key" @change="sync()"
+                                <select x-model="sponsor.item_key" @change="syncNow()"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">Select item…</option>
                                     <template x-for="col in columns" :key="col.key">
@@ -184,7 +187,7 @@
                                 </select>
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <select x-model.number="sponsor.embellishment_position_id" @change="sync()"
+                                <select x-model.number="sponsor.embellishment_position_id" @change="syncNow()"
                                     class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                     <option value="">—</option>
                                     <template x-for="pos in embellishmentPositions" :key="pos.id">
@@ -280,7 +283,7 @@ function orderGrid(config) {
         // self-heals regardless of how/when that row or column came to exist.
         ensureCell(row, colKey) {
             if (!row.cells[colKey]) {
-                row.cells[colKey] = { size: '', qty: 1 };
+                row.cells[colKey] = { size: '', qty: 1, invalid: false };
             }
         },
 
@@ -290,6 +293,25 @@ function orderGrid(config) {
             });
         },
 
+        // Live feedback while typing: red-highlight the cell if the current
+        // text isn't empty and doesn't (yet) match any available size.
+        onSizeTyping(event, row, col) {
+            this.ensureCell(row, col.key);
+            const typed = event.target.value.trim();
+            const cell = row.cells[col.key];
+
+            if (typed === '') {
+                cell.invalid = false;
+                return;
+            }
+
+            const sizes = this.productSizes(col);
+            cell.invalid = !sizes.some(s => s.toLowerCase() === typed.toLowerCase());
+        },
+
+        // On commit (blur / Enter / Tab away): the stored size is always
+        // either empty or an exact match — anything else is rejected and
+        // reverted, so an invalid size can never be saved.
         onSizeInput(event, row, col) {
             const typed = event.target.value.trim();
             this.ensureCell(row, col.key);
@@ -297,6 +319,7 @@ function orderGrid(config) {
 
             if (typed === '') {
                 cell.size = '';
+                cell.invalid = false;
                 event.target.value = '';
                 this.sync();
                 return;
@@ -305,6 +328,7 @@ function orderGrid(config) {
             const sizes = this.productSizes(col);
             const match = sizes.find(s => s.toLowerCase() === typed.toLowerCase());
             cell.size = match || cell.size; // reject non-matching text, keep last valid size
+            cell.invalid = false;
             event.target.value = cell.size;
             this.sync();
         },
@@ -313,7 +337,7 @@ function orderGrid(config) {
             const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0 };
             this.columns.push(col);
             this.ensureAllCells();
-            this.sync();
+            this.syncNow();
         },
 
         removeColumn(colKey) {
@@ -321,7 +345,7 @@ function orderGrid(config) {
             this.columns = this.columns.filter(c => c.key !== colKey);
             this.rows.forEach(row => { delete row.cells[colKey]; });
             this.sponsorRows = this.sponsorRows.filter(s => s.item_key !== colKey);
-            this.sync();
+            this.syncNow();
         },
 
         onProductInput(event, col) {
@@ -335,13 +359,13 @@ function orderGrid(config) {
         onProductChange(col) {
             const product = this.products.find(p => p.id == col.product_id);
             col.unit_price = product ? product.price : 0;
-            this.rows.forEach(row => { row.cells[col.key] = { size: '', qty: 1 }; });
-            this.sync();
+            this.rows.forEach(row => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
+            this.syncNow();
         },
 
         addRow() {
             const row = { key: this.newKey('tmp'), id: null, player_name: '', number: '', initials: '', notes: '', cells: {} };
-            this.columns.forEach(col => { row.cells[col.key] = { size: '', qty: 1 }; });
+            this.columns.forEach(col => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
             this.rows.push(row);
             this.sync();
         },
@@ -351,7 +375,7 @@ function orderGrid(config) {
             const hasContent = row && (row.player_name || row.number || row.initials || Object.values(row.cells).some(c => c.size));
             if (hasContent && !confirm('Remove this player row?')) return;
             this.rows = this.rows.filter(r => r.key !== rowKey);
-            this.sync();
+            this.syncNow();
         },
 
         loadPackageItems() {
@@ -368,13 +392,13 @@ function orderGrid(config) {
 
             this.rows.forEach(row => {
                 row.cells = {};
-                this.columns.forEach(col => { row.cells[col.key] = { size: '', qty: 1 }; });
+                this.columns.forEach(col => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
             });
 
             const columnKeys = this.columns.map(c => c.key);
             this.sponsorRows = this.sponsorRows.filter(s => columnKeys.includes(s.item_key));
 
-            this.sync();
+            this.syncNow();
         },
 
         addSponsorRow() {
@@ -385,12 +409,12 @@ function orderGrid(config) {
                 sponsor_logo_id: null,
                 embellishment_position_id: null,
             });
-            this.sync();
+            this.syncNow();
         },
 
         removeSponsorRow(key) {
             this.sponsorRows = this.sponsorRows.filter(s => s.key !== key);
-            this.sync();
+            this.syncNow();
         },
 
         onSponsorLogoChange(sponsor) {
@@ -398,7 +422,7 @@ function orderGrid(config) {
             if (logo && !sponsor.embellishment_position_id) {
                 sponsor.embellishment_position_id = logo.position_id;
             }
-            this.sync();
+            this.syncNow();
         },
 
         sponsorPrice(sponsor) {
@@ -513,6 +537,17 @@ function orderGrid(config) {
             this._flushTimer = setTimeout(() => {
                 this.$wire.$set(this.statePath, json, true);
             }, 800);
+        },
+
+        // Same as sync(), but flushes to the server immediately instead of
+        // waiting out the debounce — used for infrequent, deliberate actions
+        // (adding/removing columns, rows, sponsor logos; picking a product or
+        // sponsor logo) where there's no reason to wait and every reason to
+        // want it durably saved right away.
+        syncNow() {
+            clearTimeout(this._flushTimer);
+            const json = JSON.stringify({ columns: this.columns, rows: this.rows, sponsors: this.sponsorRows });
+            this.$wire.$set(this.statePath, json, true);
         },
     };
 }

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\OrderResource\Concerns;
 
+use App\Models\EmbellishmentPosition;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderItemCell;
@@ -96,16 +97,27 @@ trait PersistsOrderGrid
             foreach ($sponsors as $sponsor) {
                 $itemId = $columnKeyToId[$sponsor['item_key'] ?? null] ?? null;
                 $sponsorLogoId = $sponsor['sponsor_logo_id'] ?? null;
-                if (! $itemId || blank($sponsorLogoId)) {
+                if (! $itemId || blank($sponsorLogoId) || (int) $sponsorLogoId <= 0) {
                     continue;
                 }
 
-                $price = (float) (SponsorLogo::find($sponsorLogoId)?->price ?? 0);
+                $logo = SponsorLogo::find($sponsorLogoId);
+                if (! $logo) {
+                    // Stale/unknown logo id — skip rather than let an invalid
+                    // foreign key roll back everything else in this save.
+                    continue;
+                }
+
+                $price = (float) $logo->price;
+                $positionId = (int) ($sponsor['embellishment_position_id'] ?? 0);
+                if ($positionId > 0 && ! EmbellishmentPosition::whereKey($positionId)->exists()) {
+                    $positionId = 0;
+                }
 
                 $attrs = [
                     'order_item_id'              => $itemId,
                     'sponsor_logo_id'            => $sponsorLogoId,
-                    'embellishment_position_id'  => $sponsor['embellishment_position_id'] ?: null,
+                    'embellishment_position_id'  => $positionId > 0 ? $positionId : null,
                     'price'                      => $price,
                 ];
 
