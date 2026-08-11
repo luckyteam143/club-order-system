@@ -137,7 +137,8 @@
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                         </td>
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1 text-right font-medium tabular-nums" x-text="'$' + rowTotal(row).toFixed(2)"></td>
-                        <td class="border-b border-gray-100 dark:border-gray-800 p-1 text-center">
+                        <td class="border-b border-gray-100 dark:border-gray-800 p-1 text-center whitespace-nowrap">
+                            <button type="button" @click="duplicateRow(row.key)" class="text-gray-400 hover:text-primary-600" title="Duplicate this row">⧉</button>
                             <button type="button" @click="removeRow(row.key)" class="text-gray-400 hover:text-danger-600" title="Remove row">🗑</button>
                         </td>
                     </tr>
@@ -408,6 +409,33 @@ function orderGrid(config) {
             const hasContent = row && (row.player_name || row.number || row.initials || Object.values(row.cells).some(c => c.size));
             if (hasContent && !confirm('Remove this player row?')) return;
             this.rows = this.rows.filter(r => r.key !== rowKey);
+            this.syncNow();
+        },
+
+        // Inserts a copy of a row directly below it — same player details and
+        // item sizes, ready to tweak (e.g. same family/teammate ordering the
+        // same kit in a different size).
+        duplicateRow(rowKey) {
+            const index = this.rows.findIndex(r => r.key === rowKey);
+            if (index === -1) return;
+
+            const source = this.rows[index];
+            const copy = {
+                key: this.newKey('tmp'),
+                id: null,
+                player_name: source.player_name,
+                number: source.number,
+                initials: source.initials,
+                notes: source.notes,
+                cells: {},
+            };
+
+            this.columns.forEach(col => {
+                const src = source.cells[col.key];
+                copy.cells[col.key] = { size: src ? src.size : '', qty: src ? src.qty : 1, invalid: false };
+            });
+
+            this.rows.splice(index + 1, 0, copy);
             this.syncNow();
         },
 
