@@ -481,11 +481,17 @@ function orderGrid(config) {
         // Inserts a copy of a row (same player details and item sizes)
         // directly below the source row — ready to tweak (e.g. same
         // family/teammate ordering the same kit in a different size).
+        //
+        // Appended to the end rather than inserted right after the source:
+        // inserting mid-array (via splice, or via a full reassigned array)
+        // leaves this template's row-tracking out of sync with which DOM row
+        // is bound to which array item — confirmed by duplicating/removing
+        // acting on the wrong row. Appending is the one approach that's held
+        // up reliably, so correctness wins over exact position here.
         duplicateRow(rowKey) {
-            const index = this.rows.findIndex(r => r.key === rowKey);
-            if (index === -1) return;
+            const source = this.rows.find(r => r.key === rowKey);
+            if (!source) return;
 
-            const source = this.rows[index];
             const copy = {
                 key: this.newKey('tmp'),
                 id: null,
@@ -501,7 +507,7 @@ function orderGrid(config) {
                 copy.cells[col.key] = { size: src ? src.size : '', qty: src ? src.qty : 1, invalid: false };
             });
 
-            this.rows.splice(index + 1, 0, copy);
+            this.rows.push(copy);
             this.sync();
         },
 
