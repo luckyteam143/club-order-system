@@ -98,17 +98,20 @@
 
                         <template x-for="col in columns" :key="col.key">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1" x-init="ensureCell(row, col.key)">
-                                <select x-show="col.product_id" :data-row="rowIndex" :data-col="col.key"
-                                    x-model="row.cells[col.key].size"
+                                <input type="text" x-show="col.product_id"
+                                    :list="'order-grid-sizes-' + col.key"
+                                    :value="row.cells[col.key] ? row.cells[col.key].size : ''"
+                                    :data-row="rowIndex" :data-col="col.key"
+                                    placeholder="Size…"
                                     @keydown.enter.prevent="moveDown($event)"
                                     @paste="onPaste($event, rowIndex, col.key)"
-                                    @change="sync()"
-                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                                    <option value="">—</option>
+                                    @change="onSizeInput($event, row, col)"
+                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                <datalist :id="'order-grid-sizes-' + col.key">
                                     <template x-for="size in productSizes(col)" :key="size">
-                                        <option :value="size" x-text="size"></option>
+                                        <option :value="size"></option>
                                     </template>
-                                </select>
+                                </datalist>
                             </td>
                         </template>
 
@@ -285,6 +288,25 @@ function orderGrid(config) {
             this.rows.forEach(row => {
                 this.columns.forEach(col => this.ensureCell(row, col.key));
             });
+        },
+
+        onSizeInput(event, row, col) {
+            const typed = event.target.value.trim();
+            this.ensureCell(row, col.key);
+            const cell = row.cells[col.key];
+
+            if (typed === '') {
+                cell.size = '';
+                event.target.value = '';
+                this.sync();
+                return;
+            }
+
+            const sizes = this.productSizes(col);
+            const match = sizes.find(s => s.toLowerCase() === typed.toLowerCase());
+            cell.size = match || cell.size; // reject non-matching text, keep last valid size
+            event.target.value = cell.size;
+            this.sync();
         },
 
         addColumn() {
@@ -478,8 +500,19 @@ function orderGrid(config) {
             this.sync();
         },
 
+        // Updates the Livewire component's local state immediately (no request),
+        // AND schedules a real, debounced flush to the server shortly after —
+        // so the grid's data is durably saved server-side within ~1s of the
+        // last edit, not just held in the browser waiting for some other
+        // action (like the Save button) to happen to bundle it along.
         sync() {
-            this.$wire.$set(this.statePath, JSON.stringify({ columns: this.columns, rows: this.rows, sponsors: this.sponsorRows }), false);
+            const json = JSON.stringify({ columns: this.columns, rows: this.rows, sponsors: this.sponsorRows });
+            this.$wire.$set(this.statePath, json, false);
+
+            clearTimeout(this._flushTimer);
+            this._flushTimer = setTimeout(() => {
+                this.$wire.$set(this.statePath, json, true);
+            }, 800);
         },
     };
 }
