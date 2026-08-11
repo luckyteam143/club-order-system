@@ -20,7 +20,7 @@ class StatsOverview extends BaseWidget
                 Stat::make('My Orders', $orders->count()),
                 Stat::make('Draft Orders', (clone $orders)->where('status', 'draft')->count()),
                 Stat::make('Submitted Orders', (clone $orders)->where('status', 'submitted')->count()),
-                Stat::make('Total Spent', '£' . number_format((clone $orders)->where('status', 'completed')->sum('total'), 2)),
+                Stat::make('Total Spent', '$' . number_format((clone $orders)->where('status', 'completed')->sum('total'), 2)),
             ];
         }
 

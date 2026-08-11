@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\OrderResource\Pages;
+use App\Models\Embellishment;
 use App\Models\Order;
 use App\Models\Package;
 use App\Models\Product;
@@ -14,7 +15,6 @@ use Filament\Forms\Set;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Illuminate\Support\Collection;
 
 class OrderResource extends Resource
 {
@@ -62,7 +62,12 @@ class OrderResource extends Resource
                             'completed'  => 'Completed',
                         ])
                         ->required()
-                        ->default('draft'),
+                        ->default('draft')
+                        ->disabled(fn () => !auth()->user()?->isAdmin())
+                        ->dehydrated()
+                        ->helperText(fn () => auth()->user()?->isAdmin()
+                            ? null
+                            : 'New orders save as Draft. Use "Submit Order" below when it\'s ready — you can keep editing until then.'),
 
                     Forms\Components\Textarea::make('notes')
                         ->label('Order Notes')
@@ -71,98 +76,21 @@ class OrderResource extends Resource
                 ])
                 ->columns(2),
 
-            // ── PLAYER ROWS ───────────────────────────────────────────────
+            // ── SPREADSHEET GRID ─────────────────────────────────────────
             Forms\Components\Section::make('Players & Items')
-                ->description('Add players and assign sizes, sponsors, and extras for each item.')
+                ->description('Fill this in like a spreadsheet: type across cells, Tab/Enter to move, or paste a roster copied straight from Excel. Item columns carry their own sponsor logo / embellishment; each cell picks a size for that player.')
                 ->schema([
-                    Forms\Components\Repeater::make('playerRows')
-                        ->label('Players')
-                        ->relationship('playerRows')
-                        ->orderColumn('player_index')
-                        ->schema([
-                            // Player header
-                            Forms\Components\Grid::make(4)->schema([
-                                Forms\Components\TextInput::make('player_name')
-                                    ->label('Player Name')
-                                    ->placeholder('e.g. John Smith'),
-                                Forms\Components\TextInput::make('number')
-                                    ->label('Number')
-                                    ->placeholder('#'),
-                                Forms\Components\TextInput::make('initials')
-                                    ->label('Initials')
-                                    ->maxLength(5),
-                                Forms\Components\Hidden::make('player_index'),
-                            ]),
-
-                            // Item cells
-                            Forms\Components\Repeater::make('itemCells')
-                                ->label('Items')
-                                ->relationship('itemCells')
-                                ->schema([
-                                    Forms\Components\Grid::make(6)->schema([
-                                        Forms\Components\Select::make('product_id')
-                                            ->label('Product')
-                                            ->options(fn (Get $get) => self::getAvailableProducts($get))
-                                            ->searchable()
-                                            ->required()
-                                            ->reactive()
-                                            ->columnSpan(2),
-
-                                        Forms\Components\Select::make('size')
-                                            ->label('Size')
-                                            ->options(fn (Get $get) => self::getSizesForProduct($get('product_id')))
-                                            ->reactive(),
-
-                                        Forms\Components\TextInput::make('qty')
-                                            ->label('Qty')->numeric()->default(1)->minValue(1),
-
-                                        Forms\Components\TextInput::make('unit_price')
-                                            ->label('Unit Price')->numeric()->prefix('£')
-                                            ->default(fn (Get $get) => self::getProductPrice($get('product_id'))),
-
-                                        Forms\Components\TextInput::make('extra_cost')
-                                            ->label('Extras')->numeric()->prefix('£')->default(0),
-                                    ]),
-
-                                    Forms\Components\Grid::make(3)->schema([
-                                        Forms\Components\Select::make('sponsor_logo_id')
-                                            ->label('Sponsor Logo')
-                                            ->options(SponsorLogo::pluck('name', 'id'))
-                                            ->searchable()
-                                            ->nullable()
-                                            ->reactive(),
-
-                                        Forms\Components\Select::make('sponsor_position')
-                                            ->label('Position on Item')
-                                            ->options([
-                                                'Front Chest Left'  => 'Front Chest Left',
-                                                'Front Chest Right' => 'Front Chest Right',
-                                                'Back Top'          => 'Back Top',
-                                                'Back Centre'       => 'Back Centre',
-                                                'Left Sleeve'       => 'Left Sleeve',
-                                                'Right Sleeve'      => 'Right Sleeve',
-                                                'Left Leg'          => 'Left Leg',
-                                                'Right Leg'         => 'Right Leg',
-                                                'Collar'            => 'Collar',
-                                            ])
-                                            ->visible(fn (Get $get) => filled($get('sponsor_logo_id'))),
-
-                                        Forms\Components\Placeholder::make('line_total_display')
-                                            ->label('Line Total')
-                                            ->content(fn (Get $get) => '£' . number_format(
-                                                (((float)($get('unit_price') ?? 0)) + ((float)($get('extra_cost') ?? 0))) * max(1, (int)($get('qty') ?? 1)),
-                                                2
-                                            )),
-                                    ]),
-                                ])
-                                ->addActionLabel('+ Add Item')
-                                ->collapsible()
-                                ->columnSpanFull(),
+                    Forms\Components\ViewField::make('grid_state')
+                        ->view('filament.forms.order-grid')
+                        ->viewData([
+                            'products'       => self::productsCatalogForGrid(),
+                            'sponsorLogos'   => self::sponsorLogosCatalogForGrid(),
+                            'embellishments' => self::embellishmentsCatalogForGrid(),
+                            'packages'       => self::packagesCatalogForGrid(),
                         ])
-                        ->addActionLabel('+ Add Player')
-                        ->collapsible()
-                        ->columnSpanFull()
-                        ->defaultItems(0),
+                        ->default(json_encode(['columns' => [], 'rows' => []]))
+                        ->dehydrateStateUsing(fn ($state) => is_string($state) ? $state : json_encode($state))
+                        ->columnSpanFull(),
                 ]),
 
             // ── ORDER TOTAL ───────────────────────────────────────────────
@@ -171,9 +99,10 @@ class OrderResource extends Resource
                     Forms\Components\TextInput::make('total')
                         ->label('Order Total')
                         ->numeric()
-                        ->prefix('£')
+                        ->prefix('$')
                         ->default(0)
-                        ->readOnly(fn () => !auth()->user()?->isAdmin()),
+                        ->readOnly(fn () => !auth()->user()?->isAdmin())
+                        ->helperText('Recalculated automatically from the grid when you save.'),
                 ])
                 ->columns(1),
         ]);
@@ -202,7 +131,7 @@ class OrderResource extends Resource
                         'warning'   => 'admin_edit',
                         'success'   => 'completed',
                     ]),
-                Tables\Columns\TextColumn::make('total')->money('GBP')->sortable(),
+                Tables\Columns\TextColumn::make('total')->money('CAD')->sortable(),
                 Tables\Columns\TextColumn::make('submitted_at')->dateTime()->sortable()->toggleable(),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
@@ -259,35 +188,62 @@ class OrderResource extends Resource
         ];
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────
+    // ── Grid catalog data ───────────────────────────────────────────────
 
-    private static function getAvailableProducts(Get $get): array
+    private static function productsCatalogForGrid(): array
     {
-        // Walk up to the order level to find club_id and type
-        return Product::orderBy('name')->pluck('name', 'id')->toArray();
+        return Product::whereNull('parent_sku')
+            ->where('status', 'Active')
+            ->with('attributes')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (Product $product) => [
+                'id'    => $product->id,
+                'name'  => $product->name,
+                'price' => (float) $product->retail_price,
+                'sizes' => $product->attributes->pluck('name')->values()->all(),
+            ])
+            ->values()
+            ->all();
     }
 
-    private static function getSizesForProduct(?int $productId): array
+    private static function sponsorLogosCatalogForGrid(): array
     {
-        if (!$productId) return [];
-        $product = Product::find($productId);
-        if (!$product || !$product->size) return ['One Size' => 'One Size'];
-        // For now, product has a single size field — in a real grouped-by-parent-sku
-        // scenario you'd query siblings. Return available sizes from sibling products
-        // with the same parent_sku.
-        if ($product->parent_sku) {
-            return Product::where('parent_sku', $product->parent_sku)
-                ->whereNotNull('size')
-                ->orderBy('size')
-                ->pluck('size', 'size')
-                ->toArray();
-        }
-        return [$product->size => $product->size];
+        return SponsorLogo::orderBy('name')->get()
+            ->map(fn (SponsorLogo $logo) => [
+                'id'      => $logo->id,
+                'name'    => $logo->name,
+                'price'   => (float) $logo->price,
+                'club_id' => $logo->club_id,
+            ])
+            ->values()
+            ->all();
     }
 
-    private static function getProductPrice(?int $productId): float
+    private static function embellishmentsCatalogForGrid(): array
     {
-        if (!$productId) return 0;
-        return (float) Product::find($productId)?->retail_price ?? 0;
+        return Embellishment::orderBy('name')->get()
+            ->map(fn (Embellishment $e) => [
+                'id'   => $e->id,
+                'name' => $e->name,
+                'cost' => (float) $e->cost,
+            ])
+            ->values()
+            ->all();
+    }
+
+    private static function packagesCatalogForGrid(): array
+    {
+        return Package::with('products.attributes')->get()
+            ->map(fn (Package $package) => [
+                'id'      => $package->id,
+                'club_id' => $package->club_id,
+                'items'   => $package->products->map(fn (Product $product) => [
+                    'product_id' => $product->id,
+                    'price'      => (float) ($product->pivot->per_item_price ?? $product->retail_price),
+                ])->values()->all(),
+            ])
+            ->values()
+            ->all();
     }
 }

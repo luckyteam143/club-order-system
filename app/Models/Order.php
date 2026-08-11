@@ -30,12 +30,17 @@ class Order extends Model
         return $this->hasMany(OrderPlayerRow::class)->orderBy('player_index');
     }
 
+    public function orderItems(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(OrderItem::class)->orderBy('sort_order');
+    }
+
     public function recalculateTotal(): void
     {
-        $total = $this->playerRows()
-            ->with('itemCells')
+        $total = $this->orderItems()
+            ->with('cells')
             ->get()
-            ->sum(fn ($row) => $row->itemCells->sum('line_total'));
+            ->sum(fn ($item) => $item->cells->sum('line_total'));
 
         $this->update(['total' => $total]);
     }

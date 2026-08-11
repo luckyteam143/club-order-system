@@ -34,14 +34,14 @@ class SponsorLogoResource extends Resource
                 ->directory('sponsor-logos')
                 ->imageResizeMode('cover')
                 ->imageCropAspectRatio('16:9'),
-            Forms\Components\TagsInput::make('positions')
-                ->label('Available Positions')
-                ->suggestions([
-                    'Front Chest Left', 'Front Chest Right', 'Back Top', 'Back Centre',
-                    'Left Sleeve', 'Right Sleeve', 'Left Leg', 'Right Leg', 'Collar',
-                ])
-                ->columnSpanFull(),
-        ]);
+            Forms\Components\Select::make('embellishment_position_id')
+                ->label('Position')
+                ->relationship('position', 'name')
+                ->searchable()
+                ->preload(),
+            Forms\Components\TextInput::make('price')
+                ->required()->numeric()->default(0)->prefix('$'),
+        ])->columns(2);
     }
 
     public static function table(Table $table): Table
@@ -51,9 +51,8 @@ class SponsorLogoResource extends Resource
                 Tables\Columns\ImageColumn::make('file')->label('Logo')->circular(false),
                 Tables\Columns\TextColumn::make('club.name')->label('Club')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('positions')
-                    ->badge()
-                    ->getStateUsing(fn ($record) => $record->positions ?? []),
+                Tables\Columns\TextColumn::make('position.name')->label('Position')->badge(),
+                Tables\Columns\TextColumn::make('price')->money('CAD')->sortable(),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([

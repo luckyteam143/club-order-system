@@ -22,37 +22,36 @@ class OrderExport implements FromCollection, WithHeadings, WithStyles, WithTitle
 
     public function headings(): array
     {
-        $heads = ['#', 'Player Name', 'Number', 'Initials', 'Product', 'Size', 'Qty', 'Unit Price', 'Extra Cost', 'Line Total', 'Sponsor', 'Position'];
-        return $heads;
+        return ['#', 'Player Name', 'Number', 'Initials', 'Item', 'Sponsor Logo', 'Embellishment', 'Size', 'Qty', 'Unit Price (CAD)', 'Line Total (CAD)', 'Notes'];
     }
 
     public function collection(): Collection
     {
         $rows = collect();
-        $this->order->load('playerRows.itemCells.product', 'playerRows.itemCells.sponsorLogo');
+        $this->order->load('playerRows.itemCells.orderItem.product', 'playerRows.itemCells.orderItem.sponsorLogo', 'playerRows.itemCells.orderItem.embellishment');
 
         foreach ($this->order->playerRows as $player) {
             foreach ($player->itemCells as $cell) {
+                $item = $cell->orderItem;
                 $rows->push([
                     $player->player_index,
                     $player->player_name,
                     $player->number,
                     $player->initials,
-                    $cell->product?->name,
+                    $item?->product?->name,
+                    $item?->sponsorLogo?->name,
+                    $item?->embellishment?->name,
                     $cell->size,
                     $cell->qty,
-                    $cell->unit_price,
-                    $cell->extra_cost,
+                    $item?->unit_price,
                     $cell->line_total,
-                    $cell->sponsorLogo?->name,
-                    $cell->sponsor_position,
+                    $player->notes,
                 ]);
             }
         }
 
-        // Totals row
         $rows->push([]);
-        $rows->push(['', '', '', '', '', '', '', '', 'ORDER TOTAL', $this->order->total, '', '']);
+        $rows->push(['', '', '', '', '', '', '', '', '', 'ORDER TOTAL', $this->order->total, '']);
 
         return $rows;
     }

@@ -29,7 +29,7 @@ class PackageResource extends Resource
                     ->preload()
                     ->required(),
                 Forms\Components\TextInput::make('price')
-                    ->required()->numeric()->default(0)->prefix('£'),
+                    ->required()->numeric()->default(0)->prefix('$'),
                 Forms\Components\Select::make('status')
                     ->options(['active' => 'Active', 'inactive' => 'Inactive'])
                     ->required()->default('active'),
@@ -42,14 +42,15 @@ class PackageResource extends Resource
                     ->schema([
                         Forms\Components\Select::make('id')
                             ->label('Product')
-                            ->options(\App\Models\Product::pluck('name', 'id'))
+                            ->helperText('Only parent products can be added to a package.')
+                            ->options(\App\Models\Product::whereNull('parent_sku')->pluck('name', 'id'))
                             ->searchable()
                             ->preload()
                             ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
                         Forms\Components\TextInput::make('pivot.qty')
                             ->label('Qty')->numeric()->default(1)->minValue(1),
                         Forms\Components\TextInput::make('pivot.per_item_price')
-                            ->label('Price Override')->numeric()->prefix('£')->nullable(),
+                            ->label('Price Override')->numeric()->prefix('$')->nullable(),
                     ])
                     ->columns(3)
                     ->columnSpanFull()
@@ -64,7 +65,7 @@ class PackageResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('club.name')->label('Club')->sortable()->searchable(),
-                Tables\Columns\TextColumn::make('price')->money('GBP')->sortable(),
+                Tables\Columns\TextColumn::make('price')->money('CAD')->sortable(),
                 Tables\Columns\BadgeColumn::make('status')
                     ->colors(['success' => 'active', 'danger' => 'inactive']),
                 Tables\Columns\TextColumn::make('products_count')

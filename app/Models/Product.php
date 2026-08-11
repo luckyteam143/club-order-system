@@ -8,6 +8,10 @@ class Product extends Model
 {
     protected $fillable = [
         'barcode', 'parent_sku', 'default_sku', 'size', 'name',
+        'status', 'description', 'image_link', 'gallery_links',
+        'year', 'available_until_year', 'total_look', 'weight',
+        'color1_code', 'color1_label', 'color2_code', 'color2_label',
+        'co_sponsorship_id',
         'qty', 'on_backorder', 'backorder_date', 'retail_price',
     ];
 
@@ -15,7 +19,13 @@ class Product extends Model
         'on_backorder' => 'boolean',
         'backorder_date' => 'date',
         'retail_price' => 'decimal:2',
+        'weight' => 'decimal:2',
     ];
+
+    public function coSponsorship(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(CoSponsorship::class);
+    }
 
     public function packages(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
@@ -27,9 +37,14 @@ class Product extends Model
         return $this->belongsToMany(Attribute::class)->withTimestamps();
     }
 
-    public function orderItemCells(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function orderItems(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
-        return $this->hasMany(OrderItemCell::class);
+        return $this->hasMany(OrderItem::class);
+    }
+
+    public function isParent(): bool
+    {
+        return blank($this->parent_sku);
     }
 
     public function getStockStatusAttribute(): string
