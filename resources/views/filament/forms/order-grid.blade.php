@@ -14,6 +14,12 @@
     x-init="init()"
     class="fi-order-grid"
 >
+    <datalist id="order-grid-products">
+        <template x-for="p in products" :key="p.id">
+            <option :value="p.name"></option>
+        </template>
+    </datalist>
+
     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div class="flex flex-wrap gap-2">
             <button type="button" x-show="isIndividual()" @click="addColumn()"
@@ -41,13 +47,11 @@
                     <template x-for="col in columns" :key="col.key">
                         <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 align-top min-w-[13rem]">
                             <div class="flex items-start justify-between gap-1">
-                                <select x-model.number="col.product_id" @change="onProductChange(col)"
-                                    class="fi-select w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs font-semibold">
-                                    <option value="">Select product…</option>
-                                    <template x-for="p in products" :key="p.id">
-                                        <option :value="p.id" x-text="p.name"></option>
-                                    </template>
-                                </select>
+                                <input type="text" list="order-grid-products"
+                                    :value="productName(col.product_id)"
+                                    @change="onProductInput($event, col)"
+                                    placeholder="Type to search product…"
+                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs font-semibold">
                                 <button type="button" x-show="isIndividual()" @click="removeColumn(col.key)"
                                     class="shrink-0 text-gray-400 hover:text-danger-600" title="Remove item">✕</button>
                             </div>
@@ -109,7 +113,7 @@
                         <template x-for="col in columns" :key="col.key">
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                                 <select x-show="col.product_id" :data-row="rowIndex" :data-col="col.key"
-                                    x-model="cellFor(row, col.key).size"
+                                    x-model="row.cells[col.key].size"
                                     @keydown.enter.prevent="moveDown($event)"
                                     @paste="onPaste($event, rowIndex, col.key)"
                                     @change="sync()"
@@ -168,6 +172,8 @@ function orderGrid(config) {
             this.columns = (config.initial.columns || []).map(c => ({ ...c }));
             this.rows = (config.initial.rows || []).map(r => ({ ...r, cells: { ...(r.cells || {}) } }));
 
+            this.ensureAllCells();
+
             if (this.rows.length === 0) {
                 this.addRow();
             }
@@ -208,6 +214,25 @@ function orderGrid(config) {
             return product ? product.sizes : [];
         },
 
+        productName(id) {
+            const product = this.products.find(p => p.id == id);
+            return product ? product.name : '';
+        },
+
+        // Guarantees every row has a cell object for every column, so template
+        // bindings can always safely read/write `row.cells[col.key].size`
+        // without racing the reactive array/object mutations that add rows or
+        // columns.
+        ensureAllCells() {
+            this.rows.forEach(row => {
+                this.columns.forEach(col => {
+                    if (!row.cells[col.key]) {
+                        row.cells[col.key] = { size: '', qty: 1 };
+                    }
+                });
+            });
+        },
+
         cellFor(row, colKey) {
             if (!row.cells[colKey]) {
                 row.cells[colKey] = { size: '', qty: 1 };
@@ -219,7 +244,7 @@ function orderGrid(config) {
         addColumn() {
             const col = { key: this.newKey('tmp'), id: null, product_id: null, sponsor_logo_id: null, embellishment_id: null, unit_price: 0 };
             this.columns.push(col);
-            this.rows.forEach(row => { row.cells[col.key] = { size: '', qty: 1 }; });
+            this.ensureAllCells();
             this.sync();
         },
 
@@ -228,6 +253,14 @@ function orderGrid(config) {
             this.columns = this.columns.filter(c => c.key !== colKey);
             this.rows.forEach(row => { delete row.cells[colKey]; });
             this.sync();
+        },
+
+        onProductInput(event, col) {
+            const typed = event.target.value.trim();
+            const match = this.products.find(p => p.name.toLowerCase() === typed.toLowerCase());
+            col.product_id = match ? match.id : null;
+            event.target.value = this.productName(col.product_id);
+            this.onProductChange(col);
         },
 
         onProductChange(col) {
