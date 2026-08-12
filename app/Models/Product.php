@@ -8,7 +8,7 @@ class Product extends Model
 {
     protected $fillable = [
         'barcode', 'parent_sku', 'default_sku', 'size', 'name',
-        'status', 'description', 'image_link', 'gallery_links',
+        'status', 'macro_category', 'description', 'image_link', 'gallery_links',
         'year', 'available_until_year', 'total_look', 'weight',
         'color1_code', 'color1_label', 'color2_code', 'color2_label',
         'co_sponsorship_id',
@@ -32,6 +32,11 @@ class Product extends Model
         return $this->belongsToMany(Package::class)->withPivot(['qty', 'per_item_price'])->withTimestamps();
     }
 
+    public function clubs(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Club::class)->withTimestamps();
+    }
+
     public function attributes(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
         return $this->belongsToMany(Attribute::class)->withTimestamps();
@@ -42,9 +47,29 @@ class Product extends Model
         return $this->hasMany(OrderItem::class);
     }
 
+    public function warehouseStocks(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(ProductWarehouseStock::class);
+    }
+
     public function isParent(): bool
     {
         return blank($this->parent_sku);
+    }
+
+    /**
+     * Keeps the flat `qty` column (used everywhere else — stock status,
+     * exports, order pricing) in sync with the sum of this product's
+     * per-warehouse stock, once it has any. Products with no warehouse
+     * breakdown yet keep their existing manually-set `qty` untouched.
+     */
+    public function recalculateStock(): void
+    {
+        if (! $this->warehouseStocks()->exists()) {
+            return;
+        }
+
+        $this->update(['qty' => (int) $this->warehouseStocks()->sum('qty')]);
     }
 
     public function getStockStatusAttribute(): string

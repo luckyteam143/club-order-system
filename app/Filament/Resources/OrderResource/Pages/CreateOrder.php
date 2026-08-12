@@ -13,6 +13,14 @@ class CreateOrder extends CreateRecord
 
     protected static string $resource = OrderResource::class;
 
+    public function mount(): void
+    {
+        // See EditOrder::mount() — the inlined product catalog can be large.
+        ini_set('memory_limit', '512M');
+
+        parent::mount();
+    }
+
     protected function getCreateFormAction(): Action
     {
         return parent::getCreateFormAction()->label('Save as Draft');
@@ -29,5 +37,10 @@ class CreateOrder extends CreateRecord
     protected function afterCreate(): void
     {
         $this->persistGridState($this->record, $this->gridState ?? ['columns' => [], 'rows' => []]);
+
+        // See EditOrder::afterSave() — clears the grid's local-storage
+        // recovery snapshot for the "create" page slot the moment this
+        // order is actually saved.
+        $this->dispatch('order-grid-saved');
     }
 }

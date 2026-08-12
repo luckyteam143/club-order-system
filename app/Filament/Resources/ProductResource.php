@@ -32,6 +32,13 @@ class ProductResource extends Resource
                     ->options(['Active' => 'Active', 'Inactive' => 'Inactive'])
                     ->default('Active')
                     ->required(),
+                Forms\Components\TextInput::make('macro_category')
+                    ->label('Macro Category')
+                    ->datalist(fn () => \App\Models\Product::whereNotNull('macro_category')
+                        ->distinct()
+                        ->orderBy('macro_category')
+                        ->pluck('macro_category')
+                        ->all()),
                 Forms\Components\Select::make('co_sponsorship_id')
                     ->label('Co-Sponsorship')
                     ->relationship('coSponsorship', 'name')
@@ -90,10 +97,12 @@ class ProductResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable()->wrap(),
+                Tables\Columns\TextColumn::make('default_sku')->label('Default SKU')->searchable()->toggleable(),
                 Tables\Columns\TextColumn::make('size')->searchable(),
                 Tables\Columns\TextColumn::make('parent_sku')->label('Parent SKU')->searchable()->toggleable(),
                 Tables\Columns\BadgeColumn::make('status')
                     ->colors(['success' => 'Active', 'danger' => 'Inactive']),
+                Tables\Columns\TextColumn::make('macro_category')->label('Macro Category')->searchable()->toggleable(),
                 Tables\Columns\TextColumn::make('qty')->label('Stock')->numeric()->sortable()
                     ->color(fn ($record) => match(true) {
                         $record->qty === 0 => 'danger',
@@ -109,6 +118,13 @@ class ProductResource extends Resource
             ->filters([
                 Tables\Filters\TernaryFilter::make('on_backorder')->label('On Backorder'),
                 Tables\Filters\SelectFilter::make('status')->options(['Active' => 'Active', 'Inactive' => 'Inactive']),
+                Tables\Filters\SelectFilter::make('macro_category')
+                    ->label('Macro Category')
+                    ->options(fn () => Product::whereNotNull('macro_category')
+                        ->distinct()
+                        ->orderBy('macro_category')
+                        ->pluck('macro_category', 'macro_category')
+                        ->all()),
             ])
             ->actions([Tables\Actions\EditAction::make()])
             ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])]);

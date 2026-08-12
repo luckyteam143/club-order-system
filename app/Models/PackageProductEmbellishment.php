@@ -5,21 +5,19 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class OrderItemEmbellishment extends Model
+class PackageProductEmbellishment extends Model
 {
     protected $fillable = [
-        'order_item_id', 'embellishment_id', 'embellishment_position_id', 'price',
-        'override_price',
+        'package_product_id', 'embellishment_id', 'embellishment_position_id', 'override_price',
     ];
 
     protected $casts = [
-        'price' => 'decimal:2',
         'override_price' => 'decimal:2',
     ];
 
-    public function orderItem(): BelongsTo
+    public function packageProduct(): BelongsTo
     {
-        return $this->belongsTo(OrderItem::class);
+        return $this->belongsTo(PackageProduct::class);
     }
 
     public function embellishment(): BelongsTo

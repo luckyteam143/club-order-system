@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Filament\Resources\ProductResource\Pages;
+namespace App\Filament\Resources\StockResource\Pages;
 
-use App\Filament\Resources\ProductResource;
-use App\Imports\ProductsImport;
+use App\Filament\Resources\StockResource;
+use App\Imports\StockImport;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Notifications\Notification;
@@ -11,9 +11,9 @@ use Filament\Resources\Pages\ListRecords;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 
-class ListProducts extends ListRecords
+class ListStock extends ListRecords
 {
-    protected static string $resource = ProductResource::class;
+    protected static string $resource = StockResource::class;
 
     protected function getHeaderActions(): array
     {
@@ -26,26 +26,24 @@ class ListProducts extends ListRecords
                     Forms\Components\FileUpload::make('file')
                         ->label('Excel / CSV File')
                         ->disk('local')
-                        ->directory('imports/products')
+                        ->directory('imports/stock')
                         ->acceptedFileTypes([
                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                             'application/vnd.ms-excel',
                             'text/csv',
                         ])
                         ->required()
-                        ->helperText('Columns: ID (optional, to update), Barcode, Parent SKU, Default SKU, Size, Name, Qty, On Backorder, Backorder Date, Retail Price, Attributes (comma-separated names).'),
+                        ->helperText('Columns: Product ID (optional if Barcode given), Barcode, Warehouse (name or code), Qty. Matches the Export Excel layout.'),
                 ])
                 ->action(function (array $data) {
                     $path = Storage::disk('local')->path($data['file']);
 
-                    // Large workbooks can take well past the server's default
-                    // 30s / 128M FPM limits to parse + import; raise them just
-                    // for this request rather than touching the shared php.ini.
+                    // See ListProducts::import — same 30s/128M FPM limits apply.
                     set_time_limit(600);
                     ini_set('memory_limit', '512M');
 
                     try {
-                        $import = new ProductsImport();
+                        $import = new StockImport();
                         Excel::import($import, $path);
                     } catch (\Throwable $e) {
                         Storage::disk('local')->delete($data['file']);
@@ -69,7 +67,7 @@ class ListProducts extends ListRecords
                             ->send();
                     } else {
                         Notification::make()
-                            ->title('Products imported successfully')
+                            ->title('Stock imported successfully')
                             ->success()
                             ->send();
                     }
@@ -78,8 +76,13 @@ class ListProducts extends ListRecords
                 ->label('Export Excel')
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
-                ->url(route('products.export'))
+                ->url(route('stock.export'))
                 ->openUrlInNewTab(),
+            Actions\Action::make('bulk')
+                ->label('Bulk Add / Edit Stock')
+                ->icon('heroicon-o-table-cells')
+                ->color('primary')
+                ->url(StockResource::getUrl('bulk')),
             Actions\CreateAction::make(),
         ];
     }

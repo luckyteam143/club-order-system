@@ -15,6 +15,17 @@ class EditOrder extends EditRecord
 
     protected static string $resource = OrderResource::class;
 
+    public function mount(int | string $record): void
+    {
+        // The catalog (embedded inline into the grid as JSON) can run into
+        // the thousands of products; raise the memory ceiling for this page
+        // rather than let a growing catalog fatal it under the shared 128M
+        // PHP-FPM limit.
+        ini_set('memory_limit', '512M');
+
+        parent::mount($record);
+    }
+
     protected function getHeaderActions(): array
     {
         return [
@@ -62,5 +73,10 @@ class EditOrder extends EditRecord
     protected function afterSave(): void
     {
         $this->persistGridState($this->record, $this->gridState ?? ['columns' => [], 'rows' => []]);
+
+        // Lets the grid clear its local-storage recovery snapshot the
+        // moment a real save succeeds, instead of waiting for the next
+        // page load's "does this differ from the server?" comparison.
+        $this->dispatch('order-grid-saved');
     }
 }

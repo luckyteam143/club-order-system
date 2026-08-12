@@ -42,6 +42,8 @@ trait PersistsOrderGrid
             'item_key'                  => 'i'.$item->id,
             'sponsor_logo_id'           => $sponsor->sponsor_logo_id,
             'embellishment_position_id' => $sponsor->embellishment_position_id,
+            'brochure_link'             => $sponsor->brochure_link,
+            'override_price'            => $sponsor->override_price,
         ]))->values()->all();
 
         $embellishments = $order->orderItems->flatMap(fn (OrderItem $item) => $item->embellishments->map(fn ($e) => [
@@ -50,6 +52,7 @@ trait PersistsOrderGrid
             'item_key'                  => 'i'.$item->id,
             'embellishment_id'          => $e->embellishment_id,
             'embellishment_position_id' => $e->embellishment_position_id,
+            'override_price'            => $e->override_price,
         ]))->values()->all();
 
         $rows = $order->playerRows->map(function ($row) {
@@ -125,12 +128,15 @@ trait PersistsOrderGrid
                 }
 
                 $positionId = $this->resolvePositionId($sponsor['embellishment_position_id'] ?? null);
+                $overridePrice = $this->resolveOverridePrice($sponsor['override_price'] ?? null);
 
                 $attrs = [
                     'order_item_id'              => $itemId,
                     'sponsor_logo_id'            => $sponsorLogoId,
                     'embellishment_position_id'  => $positionId,
-                    'price'                      => (float) $logo->price,
+                    'brochure_link'              => blank($sponsor['brochure_link'] ?? null) ? null : $sponsor['brochure_link'],
+                    'override_price'             => $overridePrice,
+                    'price'                      => $overridePrice ?? (float) $logo->price,
                 ];
 
                 $id = $sponsor['id'] ?? null;
@@ -162,12 +168,14 @@ trait PersistsOrderGrid
                 }
 
                 $positionId = $this->resolvePositionId($embellishment['embellishment_position_id'] ?? null);
+                $overridePrice = $this->resolveOverridePrice($embellishment['override_price'] ?? null);
 
                 $attrs = [
                     'order_item_id'              => $itemId,
                     'embellishment_id'           => $embellishmentId,
                     'embellishment_position_id'  => $positionId,
-                    'price'                      => (float) $catalogEmbellishment->cost,
+                    'override_price'             => $overridePrice,
+                    'price'                      => $overridePrice ?? (float) $catalogEmbellishment->cost,
                 ];
 
                 $id = $embellishment['id'] ?? null;
@@ -262,5 +270,16 @@ trait PersistsOrderGrid
         }
 
         return $positionId;
+    }
+
+    /**
+     * A blank override means "use the catalog price" — anything else is
+     * coerced to a float so it can replace it outright.
+     */
+    private function resolveOverridePrice(mixed $rawOverridePrice): ?float
+    {
+        // blank() correctly treats 0 / "0" as real (non-blank) values, so
+        // an override of exactly zero is preserved rather than discarded.
+        return blank($rawOverridePrice) ? null : (float) $rawOverridePrice;
     }
 }

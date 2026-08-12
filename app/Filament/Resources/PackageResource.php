@@ -4,8 +4,10 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\PackageResource\Pages;
 use App\Models\Package;
+use App\Models\Product;
 use Filament\Forms;
 use Filament\Forms\Form;
+use Filament\Forms\Get;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -27,7 +29,8 @@ class PackageResource extends Resource
                     ->relationship('club', 'name')
                     ->searchable()
                     ->preload()
-                    ->required(),
+                    ->required()
+                    ->reactive(),
                 Forms\Components\TextInput::make('price')
                     ->required()->numeric()->default(0)->prefix('$'),
                 Forms\Components\Select::make('status')
@@ -36,27 +39,134 @@ class PackageResource extends Resource
             ])->columns(2),
 
             Forms\Components\Section::make('Products in Package')->schema([
-                Forms\Components\Repeater::make('packageProducts')
+                // Deliberately NOT ->relationship('products') — Filament's
+                // Repeater relationship-save treats every row without an
+                // already-hydrated related record as a brand new model to
+                // *create*, which tried to insert a blank Product row here.
+                // State is saved manually via PersistsPackageItems instead.
+                Forms\Components\Repeater::make('items')
                     ->label('Items')
-                    ->relationship('products')
                     ->schema([
-                        Forms\Components\Select::make('id')
+                        Forms\Components\Select::make('product_id')
                             ->label('Product')
-                            ->helperText('Only parent products can be added to a package.')
-                            ->options(\App\Models\Product::whereNull('parent_sku')->pluck('name', 'id'))
+                            ->helperText('Only items assigned to this package\'s club (see the Clubs page) are offered — select a club above first.')
+                            ->required()
                             ->searchable()
-                            ->preload()
+                            ->disabled(fn (Get $get) => blank($get('../../club_id')))
+                            // The catalog runs into the thousands of products —
+                            // search remotely instead of ->preload()ing every
+                            // option, which was blowing past the memory limit.
+                            // Also scoped to only the products assigned to
+                            // this package's club (App\Models\Club::products).
+                            ->getSearchResultsUsing(function (string $search, Get $get) {
+                                $clubId = $get('../../club_id');
+
+                                if (blank($clubId)) {
+                                    return [];
+                                }
+
+                                return Product::whereNull('parent_sku')
+                                    ->whereHas('clubs', fn ($query) => $query->where('clubs.id', $clubId))
+                                    ->where('name', 'like', "%{$search}%")
+                                    ->orderBy('name')
+                                    ->limit(50)
+                                    ->pluck('name', 'id');
+                            })
+                            ->getOptionLabelUsing(fn ($value) => Product::find($value)?->name)
                             ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
-                        Forms\Components\TextInput::make('pivot.qty')
+                        Forms\Components\TextInput::make('qty')
                             ->label('Qty')->numeric()->default(1)->minValue(1),
-                        Forms\Components\TextInput::make('pivot.per_item_price')
+                        Forms\Components\TextInput::make('per_item_price')
                             ->label('Price Override')->numeric()->prefix('$')->nullable(),
                     ])
                     ->columns(3)
                     ->columnSpanFull()
-                    ->addActionLabel('Add Product'),
+                    ->addActionLabel('Add Product')
+                    ->default([])
+                    ->reactive(),
             ]),
+
+            // Kept as their own sections, separate from "Products in
+            // Package" — same layout as the Order page's Sponsor Logos /
+            // Embellishments sections. Predefined here, these auto-populate
+            // an order's own Sponsor Logos / Embellishments sections the
+            // moment this package's items are loaded — still fully editable
+            // per-order afterward.
+            Forms\Components\Section::make('Sponsor Logos')
+                ->description('Only sponsor logos assigned to this package\'s club (see the Clubs page) are offered.')
+                ->schema([
+                    Forms\Components\Repeater::make('sponsors')
+                        ->label('')
+                        ->schema([
+                            Forms\Components\Select::make('product_id')
+                                ->label('Item')
+                                ->required()
+                                ->options(fn (Get $get) => self::itemOptions($get('../../items')))
+                                ->helperText('Add the item above first.'),
+                            Forms\Components\Select::make('sponsor_logo_id')
+                                ->label('Sponsor Logo')
+                                ->required()
+                                ->disabled(fn (Get $get) => blank($get('../../club_id')))
+                                ->options(fn (Get $get) => blank($get('../../club_id'))
+                                    ? []
+                                    : \App\Models\SponsorLogo::where('club_id', $get('../../club_id'))->pluck('name', 'id'))
+                                ->searchable(),
+                            Forms\Components\Select::make('embellishment_position_id')
+                                ->label('Position')
+                                ->options(fn () => \App\Models\EmbellishmentPosition::pluck('name', 'id'))
+                                ->searchable(),
+                            Forms\Components\TextInput::make('brochure_link')
+                                ->label('Brochure Link')
+                                ->url(),
+                            Forms\Components\TextInput::make('override_price')
+                                ->label('Override Price')
+                                ->numeric()->prefix('$')->nullable(),
+                        ])
+                        ->columns(5)
+                        ->addActionLabel('Add Sponsor Logo')
+                        ->default([]),
+                ]),
+
+            Forms\Components\Section::make('Embellishments')
+                ->schema([
+                    Forms\Components\Repeater::make('embellishments')
+                        ->label('')
+                        ->schema([
+                            Forms\Components\Select::make('product_id')
+                                ->label('Item')
+                                ->required()
+                                ->options(fn (Get $get) => self::itemOptions($get('../../items')))
+                                ->helperText('Add the item above first.'),
+                            Forms\Components\Select::make('embellishment_id')
+                                ->label('Embellishment')
+                                ->required()
+                                ->options(fn () => \App\Models\Embellishment::pluck('name', 'id'))
+                                ->searchable(),
+                            Forms\Components\Select::make('embellishment_position_id')
+                                ->label('Position')
+                                ->options(fn () => \App\Models\EmbellishmentPosition::pluck('name', 'id'))
+                                ->searchable(),
+                            Forms\Components\TextInput::make('override_price')
+                                ->label('Override Price')
+                                ->numeric()->prefix('$')->nullable(),
+                        ])
+                        ->columns(4)
+                        ->addActionLabel('Add Embellishment')
+                        ->default([]),
+                ]),
         ]);
+    }
+
+    /** @param array<int, array{product_id?: int|string|null}>|null $items */
+    private static function itemOptions(?array $items): array
+    {
+        $productIds = collect($items ?? [])->pluck('product_id')->filter()->unique()->values();
+
+        if ($productIds->isEmpty()) {
+            return [];
+        }
+
+        return Product::whereIn('id', $productIds)->pluck('name', 'id')->all();
     }
 
     public static function table(Table $table): Table

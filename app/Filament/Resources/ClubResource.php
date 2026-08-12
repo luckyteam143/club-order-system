@@ -30,6 +30,41 @@ class ClubResource extends Resource
                     ->required()
                     ->default('active'),
             ])->columns(2),
+
+            Forms\Components\Section::make('Club Items')->schema([
+                // Deliberately NOT ->relationship('products') — Filament's
+                // Repeater relationship-save treats every row without an
+                // already-hydrated related record as a brand new model to
+                // *create* (see PackageResource for the same issue). State is
+                // saved manually via PersistsClubItems instead.
+                Forms\Components\Repeater::make('items')
+                    ->label('Assigned Items')
+                    ->helperText('Only parent products can be assigned. Only these products — at the prices set below — are offered when an order for this club uses the "Club Items" type.')
+                    ->schema([
+                        Forms\Components\Select::make('product_id')
+                            ->label('Product')
+                            ->required()
+                            ->searchable()
+                            // The catalog runs into the thousands of products —
+                            // search remotely instead of ->preload()ing every
+                            // option, which blows past the memory limit.
+                            ->getSearchResultsUsing(fn (string $search) => \App\Models\Product::whereNull('parent_sku')
+                                ->where('name', 'like', "%{$search}%")
+                                ->orderBy('name')
+                                ->limit(50)
+                                ->pluck('name', 'id'))
+                            ->getOptionLabelUsing(fn ($value) => \App\Models\Product::find($value)?->name)
+                            ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
+                        Forms\Components\TextInput::make('club_price')
+                            ->label('Club Price')->numeric()->prefix('$'),
+                        Forms\Components\TextInput::make('online_store_price')
+                            ->label('Online Store Price')->numeric()->prefix('$'),
+                    ])
+                    ->columns(3)
+                    ->columnSpanFull()
+                    ->addActionLabel('Add Item')
+                    ->default([]),
+            ]),
         ]);
     }
 
@@ -42,6 +77,10 @@ class ClubResource extends Resource
                 Tables\Columns\TextColumn::make('phone')->searchable()->toggleable(),
                 Tables\Columns\BadgeColumn::make('status')
                     ->colors(['success' => 'active', 'danger' => 'inactive']),
+                Tables\Columns\TextColumn::make('products_count')
+                    ->label('Items')
+                    ->counts('products')
+                    ->badge(),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([

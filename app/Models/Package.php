@@ -17,7 +17,15 @@ class Package extends Model
 
     public function products(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
-        return $this->belongsToMany(Product::class)->withPivot(['qty', 'per_item_price'])->withTimestamps();
+        return $this->belongsToMany(Product::class)
+            ->using(PackageProduct::class)
+            ->withPivot(['qty', 'per_item_price'])
+            ->withTimestamps();
+    }
+
+    public function packageProducts(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(PackageProduct::class);
     }
 
     public function orders(): \Illuminate\Database\Eloquent\Relations\HasMany

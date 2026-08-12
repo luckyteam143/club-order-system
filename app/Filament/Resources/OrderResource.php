@@ -3,10 +3,12 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\OrderResource\Pages;
+use App\Models\Club;
 use App\Models\Embellishment;
 use App\Models\EmbellishmentPosition;
 use App\Models\Order;
 use App\Models\Package;
+use App\Models\PackageProduct;
 use App\Models\Product;
 use App\Models\SponsorLogo;
 use Filament\Forms;
@@ -28,54 +30,115 @@ class OrderResource extends Resource
     {
         return $form->schema([
 
-            // ── ORDER META ── a slim header strip, not a boxed form section ──
-            Forms\Components\Group::make()
+            // ── ORDER META ── three sections side by side, one column each ──
+            // Grid::make(3) alone only applies 3 columns from the `lg`
+            // breakpoint up; forcing it at `default` keeps all three side by
+            // side instead of stacking into full-width rows on narrower
+            // admin viewports.
+            Forms\Components\Grid::make(['default' => 3])
                 ->schema([
-                    Forms\Components\Select::make('club_id')
-                        ->label('Club')
-                        ->relationship('club', 'name')
-                        ->searchable()
-                        ->preload()
-                        ->required()
-                        ->reactive()
-                        ->afterStateUpdated(fn (Set $set) => $set('package_id', null)),
+                    Forms\Components\Section::make('Order')
+                        ->compact()
+                        // Section defaults to columnSpan('full') internally,
+                        // which would make it fill the whole 3-col grid row
+                        // by itself — pin it to exactly 1 column instead.
+                        ->columnSpan(1)
+                        ->schema([
+                            Forms\Components\Select::make('club_id')
+                                ->label('Club')
+                                ->relationship('club', 'name')
+                                ->searchable()
+                                ->preload()
+                                ->required()
+                                ->reactive()
+                                ->afterStateUpdated(function (Set $set, $state) {
+                                    $set('package_id', null);
 
-                    Forms\Components\Select::make('type')
-                        ->options(['package' => 'Package', 'individual' => 'Individual Items'])
-                        ->required()
-                        ->default('individual')
-                        ->reactive(),
+                                    if ($club = Club::find($state)) {
+                                        $set('shipping_address', $club->address);
+                                        $set('phone', $club->phone);
+                                        $set('email', $club->email);
+                                    }
+                                }),
 
-                    Forms\Components\Select::make('package_id')
-                        ->label('Package')
-                        ->options(fn (Get $get) => Package::where('club_id', $get('club_id'))
-                            ->where('status', 'active')
-                            ->pluck('name', 'id'))
-                        ->searchable()
-                        ->visible(fn (Get $get) => $get('type') === 'package')
-                        ->reactive(),
+                            Forms\Components\Select::make('type')
+                                ->options([
+                                    'package'    => 'Package',
+                                    'individual' => 'Individual Items',
+                                    'club_items' => 'Club Items',
+                                ])
+                                ->required()
+                                ->default('individual')
+                                ->reactive(),
 
-                    Forms\Components\Select::make('status')
-                        ->options([
-                            'draft'      => 'Draft',
-                            'submitted'  => 'Submitted',
-                            'admin_edit' => 'Admin Edit',
-                            'completed'  => 'Completed',
+                            Forms\Components\Select::make('package_id')
+                                ->label('Package')
+                                ->options(fn (Get $get) => Package::where('club_id', $get('club_id'))
+                                    ->where('status', 'active')
+                                    ->pluck('name', 'id'))
+                                ->searchable()
+                                ->visible(fn (Get $get) => $get('type') === 'package')
+                                ->reactive(),
+
+                            Forms\Components\Select::make('status')
+                                ->options([
+                                    'draft'      => 'Draft',
+                                    'submitted'  => 'Submitted',
+                                    'admin_edit' => 'Admin Edit',
+                                    'completed'  => 'Completed',
+                                ])
+                                ->required()
+                                ->default('draft')
+                                ->disabled(fn () => !auth()->user()?->isAdmin())
+                                ->dehydrated()
+                                ->helperText(fn () => auth()->user()?->isAdmin()
+                                    ? null
+                                    : 'New orders save as Draft — "Submit Order" below when ready.'),
+
+                            Forms\Components\Textarea::make('notes')
+                                ->label('Order Notes')
+                                ->rows(2),
                         ])
-                        ->required()
-                        ->default('draft')
-                        ->disabled(fn () => !auth()->user()?->isAdmin())
-                        ->dehydrated()
-                        ->helperText(fn () => auth()->user()?->isAdmin()
-                            ? null
-                            : 'New orders save as Draft — "Submit Order" below when ready.'),
+                        ->columns(1),
 
-                    Forms\Components\Textarea::make('notes')
-                        ->label('Order Notes')
-                        ->rows(1)
-                        ->columnSpan(4),
-                ])
-                ->columns(4),
+                    Forms\Components\Section::make('Order Details')
+                        ->compact()
+                        ->columnSpan(1)
+                        ->schema([
+                            Forms\Components\TextInput::make('team_po')
+                                ->label('Team / PO #'),
+                            Forms\Components\TextInput::make('coach_manager')
+                                ->label('Coach / Manager'),
+                            Forms\Components\TextInput::make('shipping_address')
+                                ->label('Shipping Address')
+                                ->helperText('Prefilled from the club once selected — editable.'),
+                            Forms\Components\TextInput::make('phone')
+                                ->label('Phone')
+                                ->tel(),
+                            Forms\Components\TextInput::make('email')
+                                ->label('Email')
+                                ->email(),
+                        ])
+                        ->columns(1),
+
+                    Forms\Components\Section::make('For Office Use')
+                        ->compact()
+                        ->columnSpan(1)
+                        ->schema([
+                            Forms\Components\DatePicker::make('order_date')
+                                ->label('Order Date')
+                                ->default(now()),
+                            Forms\Components\TextInput::make('b2b_number')
+                                ->label('B2B Number'),
+                            Forms\Components\TextInput::make('qb_invoice')
+                                ->label('QB Invoice #'),
+                            Forms\Components\TextInput::make('brochure_link')
+                                ->label('Link to Brochure')
+                                ->url(),
+                        ])
+                        ->columns(1)
+                        ->visible(fn () => auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin()),
+                ]),
 
             // ── THE SHEET ──────────────────────────────────────────────────
             Forms\Components\ViewField::make('grid_state')
@@ -86,6 +149,7 @@ class OrderResource extends Resource
                     'embellishments'         => self::embellishmentsCatalogForGrid(),
                     'embellishmentPositions' => self::embellishmentPositionsCatalogForGrid(),
                     'packages'               => self::packagesCatalogForGrid(),
+                    'clubItems'              => self::clubItemsCatalogForGrid(),
                 ])
                 ->default(json_encode(['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => []]))
                 ->dehydrateStateUsing(fn ($state) => is_string($state) ? $state : json_encode($state))
@@ -179,16 +243,32 @@ class OrderResource extends Resource
 
     private static function productsCatalogForGrid(): array
     {
-        return Product::whereNull('parent_sku')
+        // The live catalog can run into the thousands of rows with tens of
+        // thousands of attribute pivot rows. Hydrating those as Eloquent
+        // models (each attribute row becomes a full Attribute model wrapped
+        // in a Pivot instance) is what actually blows the memory limit —
+        // pull everything through the query builder instead, which returns
+        // lightweight stdClass rows.
+        $products = \Illuminate\Support\Facades\DB::table('products')
+            ->select(['id', 'name', 'retail_price'])
+            ->whereNull('parent_sku')
             ->where('status', 'Active')
-            ->with('attributes')
             ->orderBy('name')
+            ->get();
+
+        $sizesByProductId = \Illuminate\Support\Facades\DB::table('attribute_product')
+            ->join('attributes', 'attributes.id', '=', 'attribute_product.attribute_id')
+            ->whereIn('attribute_product.product_id', $products->pluck('id'))
+            ->select(['attribute_product.product_id', 'attributes.name'])
             ->get()
-            ->map(fn (Product $product) => [
+            ->groupBy('product_id');
+
+        return $products
+            ->map(fn ($product) => [
                 'id'    => $product->id,
                 'name'  => $product->name,
                 'price' => (float) $product->retail_price,
-                'sizes' => $product->attributes->pluck('name')->values()->all(),
+                'sizes' => ($sizesByProductId->get($product->id) ?? collect())->pluck('name')->values()->all(),
             ])
             ->values()
             ->all();
@@ -232,18 +312,54 @@ class OrderResource extends Resource
             ->all();
     }
 
+    /** @return array<int, array<int>> club id => assigned product ids */
+    private static function clubItemsCatalogForGrid(): array
+    {
+        $pairs = \Illuminate\Support\Facades\DB::table('club_product')->select(['club_id', 'product_id'])->get();
+
+        return $pairs->groupBy('club_id')
+            ->map(fn ($rows) => $rows->pluck('product_id')->values()->all())
+            ->all();
+    }
+
     private static function packagesCatalogForGrid(): array
     {
-        return Package::with('products.attributes')->get()
-            ->map(fn (Package $package) => [
+        // Queried directly off package_product (rather than through
+        // Package::products()) so the sponsor/embellishment predefined on
+        // each package item can be eager-loaded in one shot.
+        $packageProducts = PackageProduct::with(['sponsors', 'embellishments'])->get();
+
+        $productPrices = Product::whereIn('id', $packageProducts->pluck('product_id')->unique())
+            ->pluck('retail_price', 'id');
+
+        $packageProductsByPackage = $packageProducts->groupBy('package_id');
+
+        return Package::all()->map(function (Package $package) use ($packageProductsByPackage, $productPrices) {
+            $items = ($packageProductsByPackage->get($package->id) ?? collect())
+                ->map(fn (PackageProduct $packageProduct) => [
+                    'product_id'     => $packageProduct->product_id,
+                    'price'          => (float) ($packageProduct->per_item_price ?? $productPrices->get($packageProduct->product_id) ?? 0),
+                    'sponsors'       => $packageProduct->sponsors->map(fn ($s) => [
+                        'sponsor_logo_id'           => $s->sponsor_logo_id,
+                        'embellishment_position_id' => $s->embellishment_position_id,
+                        'brochure_link'             => $s->brochure_link,
+                        'override_price'            => is_null($s->override_price) ? null : (float) $s->override_price,
+                    ])->values()->all(),
+                    'embellishments' => $packageProduct->embellishments->map(fn ($e) => [
+                        'embellishment_id'          => $e->embellishment_id,
+                        'embellishment_position_id' => $e->embellishment_position_id,
+                        'override_price'            => is_null($e->override_price) ? null : (float) $e->override_price,
+                    ])->values()->all(),
+                ])
+                ->values()
+                ->all();
+
+            return [
                 'id'      => $package->id,
                 'club_id' => $package->club_id,
-                'items'   => $package->products->map(fn (Product $product) => [
-                    'product_id' => $product->id,
-                    'price'      => (float) ($product->pivot->per_item_price ?? $product->retail_price),
-                ])->values()->all(),
-            ])
-            ->values()
-            ->all();
+                'price'   => (float) $package->price,
+                'items'   => $items,
+            ];
+        })->values()->all();
     }
 }

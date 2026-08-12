@@ -9,10 +9,12 @@ class OrderItemSponsor extends Model
 {
     protected $fillable = [
         'order_item_id', 'sponsor_logo_id', 'embellishment_position_id', 'price',
+        'brochure_link', 'override_price',
     ];
 
     protected $casts = [
         'price' => 'decimal:2',
+        'override_price' => 'decimal:2',
     ];
 
     public function orderItem(): BelongsTo
