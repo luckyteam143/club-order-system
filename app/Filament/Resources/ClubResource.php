@@ -22,14 +22,42 @@ class ClubResource extends Resource
         return $form->schema([
             Forms\Components\Section::make('Club Details')->schema([
                 Forms\Components\TextInput::make('name')->required()->maxLength(255),
+                Forms\Components\TextInput::make('code')
+                    ->label('Club Code')
+                    ->maxLength(255)
+                    ->unique(ignoreRecord: true)
+                    ->helperText('Used to match this club\'s barcode to its Logos Stock.'),
                 Forms\Components\TextInput::make('email')->email()->required()->unique(ignoreRecord: true),
                 Forms\Components\TextInput::make('phone')->tel(),
                 Forms\Components\TextInput::make('address'),
+                Forms\Components\TextInput::make('contact_person')
+                    ->label('Contact Person')
+                    ->maxLength(255),
                 Forms\Components\Select::make('status')
                     ->options(['active' => 'Active', 'inactive' => 'Inactive'])
                     ->required()
                     ->default('active'),
+                Forms\Components\FileUpload::make('logo')
+                    ->label('Club Logo')
+                    ->directory('club-logos')
+                    ->image()
+                    ->maxSize(100)
+                    ->helperText('PNG, JPG, or SVG — max 100KB.')
+                    ->columnSpanFull(),
+                Forms\Components\Textarea::make('notes')
+                    ->label('Notes')
+                    ->columnSpanFull(),
             ])->columns(2),
+
+            Forms\Components\Section::make('Forecast Windows')
+                ->description('Overrides the global default Summer/Winter Forecast submission dates (Settings > Forecasts) for this club specifically. Leave a pair blank to use the global default instead.')
+                ->schema([
+                    Forms\Components\DatePicker::make('summer_forecast_open_at')->label('Summer Opens'),
+                    Forms\Components\DatePicker::make('summer_forecast_close_at')->label('Summer Closes'),
+                    Forms\Components\DatePicker::make('winter_forecast_open_at')->label('Winter Opens'),
+                    Forms\Components\DatePicker::make('winter_forecast_close_at')->label('Winter Closes'),
+                ])
+                ->columns(4),
 
             Forms\Components\Section::make('Club Items')->schema([
                 // Deliberately NOT ->relationship('products') — Filament's
@@ -72,9 +100,13 @@ class ClubResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\ImageColumn::make('logo')->label('Logo')->circular(false)->toggleable(),
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
+                Tables\Columns\TextColumn::make('code')->label('Club Code')->searchable()->toggleable(),
                 Tables\Columns\TextColumn::make('email')->searchable(),
                 Tables\Columns\TextColumn::make('phone')->searchable()->toggleable(),
+                Tables\Columns\TextColumn::make('contact_person')->label('Contact Person')->searchable()->toggleable(),
+                Tables\Columns\TextColumn::make('notes')->label('Notes')->limit(40)->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\BadgeColumn::make('status')
                     ->colors(['success' => 'active', 'danger' => 'inactive']),
                 Tables\Columns\TextColumn::make('products_count')
@@ -106,6 +138,6 @@ class ClubResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin();
+        return auth()->user()?->can('manage_clubs') ?? false;
     }
 }

@@ -22,6 +22,11 @@ class AttributeResource extends Resource
         return $form->schema([
             Forms\Components\TextInput::make('name')->required()->maxLength(255),
             Forms\Components\TextInput::make('sku')->label('SKU')->required()->unique(ignoreRecord: true)->maxLength(255),
+            Forms\Components\TextInput::make('position')
+                ->numeric()
+                ->default(0)
+                ->required()
+                ->helperText('Smaller numbers sort first — controls the order sizes appear in everywhere they\'re listed (e.g. XS=1, S=2, M=3…).'),
         ]);
     }
 
@@ -29,6 +34,7 @@ class AttributeResource extends Resource
     {
         return $table
             ->columns([
+                Tables\Columns\TextColumn::make('position')->sortable(),
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('sku')->label('SKU')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('products_count')
@@ -39,7 +45,8 @@ class AttributeResource extends Resource
             ])
             ->filters([])
             ->actions([Tables\Actions\EditAction::make()])
-            ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])]);
+            ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])])
+            ->defaultSort('position');
     }
 
     public static function getRelations(): array
@@ -58,6 +65,6 @@ class AttributeResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin();
+        return auth()->user()?->can('manage_attributes') ?? false;
     }
 }

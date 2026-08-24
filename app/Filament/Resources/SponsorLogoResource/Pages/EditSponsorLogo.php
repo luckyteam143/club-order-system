@@ -16,4 +16,18 @@ class EditSponsorLogo extends EditRecord
             Actions\DeleteAction::make(),
         ];
     }
+
+    /**
+     * See CreateSponsorLogo — same server-side re-enforcement, since the
+     * disabled form fields are UI-only.
+     */
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        if (auth()->user()?->isClub()) {
+            $data['club_id'] = $this->record->club_id;
+            $data['price'] = $this->record->price;
+        }
+
+        return $data;
+    }
 }

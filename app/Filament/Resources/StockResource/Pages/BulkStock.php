@@ -30,8 +30,15 @@ class BulkStock extends Page
 
     public array $warehousesForGrid = [];
 
+    // Prefills the grid's search box when arriving via a "?q=" link (e.g.
+    // the Stock listing's per-row Edit action), so that link lands directly
+    // on the matching row instead of an empty search.
+    public string $initialSearch = '';
+
     public function mount(): void
     {
+        $this->initialSearch = (string) request()->query('q', '');
+
         // Unlike the item pickers elsewhere, this page's catalog includes
         // every size variant (~30k rows) — too large to embed and filter
         // client-side without the page itself becoming slow to load and
@@ -83,7 +90,7 @@ class BulkStock extends Page
 
     public static function canAccess(array $parameters = []): bool
     {
-        return auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin();
+        return auth()->user()?->can('manage_stock') ?? false;
     }
 
     protected function getHeaderActions(): array
@@ -141,10 +148,7 @@ class BulkStock extends Page
                         continue;
                     }
 
-                    ProductWarehouseStock::updateOrCreate(
-                        ['product_id' => (int) $productId, 'warehouse_id' => (int) $warehouseId],
-                        ['qty' => max(0, (int) $qty)],
-                    );
+                    ProductWarehouseStock::applyQty((int) $productId, (int) $warehouseId, (int) $qty);
                 }
 
                 $touchedProductIds[(int) $productId] = true;

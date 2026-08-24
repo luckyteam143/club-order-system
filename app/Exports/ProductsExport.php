@@ -4,6 +4,7 @@ namespace App\Exports;
 
 use App\Models\Product;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithHeadings;
@@ -14,6 +15,9 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 class ProductsExport implements FromCollection, WithHeadings, WithMapping, WithStyles, WithTitle, ShouldAutoSize
 {
+    /** @var Collection<int, Collection> product_id => attribute name rows, smallest-to-largest by position */
+    private Collection $attributeNamesByProductId;
+
     public function title(): string
     {
         return 'Products';
@@ -32,7 +36,22 @@ class ProductsExport implements FromCollection, WithHeadings, WithMapping, WithS
 
     public function collection(): Collection
     {
-        return Product::with('attributes')->orderBy('name')->get();
+        // Product::with('attributes') hydrates a full Eloquent model +
+        // Pivot instance for every one of the catalog's ~60k
+        // attribute_product rows across ~30k products — that's what was
+        // exhausting the 256M memory limit in production. Pull the
+        // attribute names through the query builder instead (lightweight
+        // stdClass rows), same technique already used by
+        // OrderResource::productsCatalogForGrid() for the same reason.
+        $this->attributeNamesByProductId = DB::table('attribute_product')
+            ->join('attributes', 'attributes.id', '=', 'attribute_product.attribute_id')
+            ->select(['attribute_product.product_id', 'attributes.name'])
+            ->orderBy('attributes.position')
+            ->orderBy('attributes.name')
+            ->get()
+            ->groupBy('product_id');
+
+        return Product::query()->orderBy('name')->get();
     }
 
     public function map($product): array
@@ -51,7 +70,7 @@ class ProductsExport implements FromCollection, WithHeadings, WithMapping, WithS
             $product->on_backorder ? 'Yes' : 'No',
             optional($product->backorder_date)->format('Y-m-d'),
             $product->retail_price,
-            $product->attributes->pluck('name')->implode(', '),
+            ($this->attributeNamesByProductId->get($product->id) ?? collect())->pluck('name')->implode(', '),
             $product->image_link,
             $product->gallery_links,
             $product->year,

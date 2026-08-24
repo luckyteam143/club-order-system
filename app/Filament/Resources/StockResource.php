@@ -12,6 +12,7 @@ use Filament\Forms\Get;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rules\Unique;
 
 class StockResource extends Resource
@@ -63,12 +64,44 @@ class StockResource extends Resource
 
     public static function table(Table $table): Table
     {
+        // One row per item, one column per warehouse — mirrors the Bulk
+        // Add/Edit Stock grid's layout instead of one row per
+        // product+warehouse stock line.
+        $warehouses = Warehouse::where('status', 'active')->orderBy('name')->get(['id', 'name']);
+
         return $table
+            ->query(Product::query()->where('status', 'Active')->with('warehouseStocks'))
             ->columns([
-                Tables\Columns\TextColumn::make('product.name')->label('Product')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('product.barcode')->label('Barcode')->searchable()->toggleable(),
-                Tables\Columns\TextColumn::make('warehouse.name')->label('Warehouse')->sortable(),
-                Tables\Columns\TextColumn::make('qty')->label('Qty')->numeric()->sortable()
+                Tables\Columns\TextColumn::make('name')->label('Product')->searchable()->sortable(),
+                Tables\Columns\TextColumn::make('barcode')->label('Barcode')->searchable()->toggleable(),
+                Tables\Columns\TextColumn::make('size')->label('Size')->toggleable(),
+                Tables\Columns\TextColumn::make('total_look')->label('Total Look')->toggleable()
+                    // Some values (e.g. "NO TOTAL LOOK") run long enough to
+                    // stretch the whole table — cap the column width and
+                    // wrap onto multiple lines instead of growing wide.
+                    ->wrap()
+                    ->extraAttributes(['class' => 'max-w-[140px]'])
+                    // total_look only lives on the parent product row, not
+                    // its size-variant children — searching it needs to
+                    // also pull in every child whose parent matches, or a
+                    // search like "Thunder" would only ever surface the
+                    // (non-stockable) parent itself.
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->where(function (Builder $query) use ($search) {
+                            $query->where('total_look', 'like', "%{$search}%")
+                                ->orWhereIn('parent_sku', function ($subQuery) use ($search) {
+                                    $subQuery->select('default_sku')
+                                        ->from('products')
+                                        ->whereNull('parent_sku')
+                                        ->where('total_look', 'like', "%{$search}%");
+                                });
+                        });
+                    }),
+                ...$warehouses->map(fn (Warehouse $warehouse) => Tables\Columns\ViewColumn::make('warehouse_'.$warehouse->id)
+                    ->label($warehouse->name)
+                    ->view('filament.tables.columns.stock-editable-cell')
+                    ->getStateUsing(fn (Product $record) => $record->warehouseStocks->firstWhere('warehouse_id', $warehouse->id)?->qty ?? 0))->all(),
+                Tables\Columns\TextColumn::make('qty')->label('Total')->numeric()->sortable()->alignRight()
                     ->color(fn ($record) => match (true) {
                         $record->qty === 0 => 'danger',
                         $record->qty <= 5  => 'warning',
@@ -77,17 +110,26 @@ class StockResource extends Resource
                 Tables\Columns\TextColumn::make('updated_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                Tables\Filters\SelectFilter::make('warehouse_id')
-                    ->label('Warehouse')
-                    ->options(fn () => Warehouse::pluck('name', 'id')),
+                Tables\Filters\Filter::make('has_stock')
+                    ->label('Only show items with stock')
+                    // Product.qty is the running total across every
+                    // warehouse (kept in sync by recalculateStock()) — items
+                    // with 0 everywhere are hidden while this is on, nothing
+                    // is ever deleted.
+                    ->query(fn (Builder $query) => $query->where('qty', '>', 0))
+                    ->toggle(),
             ])
             ->actions([
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make()
-                    ->after(fn (ProductWarehouseStock $record) => $record->product?->recalculateStock()),
+                Tables\Actions\Action::make('edit')
+                    ->label('Edit')
+                    ->icon('heroicon-o-pencil-square')
+                    ->url(fn (Product $record) => StockResource::getUrl('bulk', ['q' => $record->barcode ?: $record->name])),
             ])
-            ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])])
-            ->defaultSort('updated_at', 'desc');
+            // Otherwise Filament defaults a whole-row click to this row
+            // action's URL, which fights with clicking a warehouse cell to
+            // edit its quantity inline.
+            ->recordUrl(null)
+            ->defaultSort('name');
     }
 
     public static function getRelations(): array
@@ -107,6 +149,6 @@ class StockResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin();
+        return auth()->user()?->can('manage_stock') ?? false;
     }
 }

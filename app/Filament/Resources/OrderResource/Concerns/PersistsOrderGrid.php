@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\OrderItemCell;
 use App\Models\OrderItemEmbellishment;
 use App\Models\OrderItemSponsor;
+use App\Models\Product;
 use App\Models\SponsorLogo;
 use Illuminate\Support\Facades\DB;
 
@@ -19,7 +20,7 @@ trait PersistsOrderGrid
     protected function buildGridState(?Order $order): array
     {
         if (! $order || ! $order->exists) {
-            return ['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => []];
+            return ['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => [], 'lastChangedCells' => []];
         }
 
         $order->loadMissing([
@@ -34,6 +35,7 @@ trait PersistsOrderGrid
             'id'          => $item->id,
             'product_id'  => $item->product_id,
             'unit_price'  => (float) $item->unit_price,
+            'notes'       => $item->notes,
         ])->values()->all();
 
         $sponsors = $order->orderItems->flatMap(fn (OrderItem $item) => $item->sponsors->map(fn ($sponsor) => [
@@ -55,10 +57,21 @@ trait PersistsOrderGrid
             'override_price'            => $e->override_price,
         ]))->values()->all();
 
-        $rows = $order->playerRows->map(function ($row) {
+        $isBulk = in_array($order->order_kind, ['bulk', 'forecast'], true);
+
+        $rows = $order->playerRows->map(function ($row) use ($isBulk) {
             $cells = [];
-            foreach ($row->itemCells as $cell) {
-                $cells['i'.$cell->order_item_id] = ['size' => $cell->size, 'qty' => (int) $cell->qty];
+
+            if ($isBulk) {
+                // One implicit row, qty per size per item instead of a
+                // single size+qty pair — see persistBulkCells().
+                foreach ($row->itemCells->groupBy('order_item_id') as $itemId => $itemCells) {
+                    $cells['i'.$itemId] = ['sizes' => $itemCells->pluck('qty', 'size')->map(fn ($qty) => (int) $qty)->all()];
+                }
+            } else {
+                foreach ($row->itemCells as $cell) {
+                    $cells['i'.$cell->order_item_id] = ['size' => $cell->size, 'qty' => (int) $cell->qty];
+                }
             }
 
             return [
@@ -72,7 +85,13 @@ trait PersistsOrderGrid
             ];
         })->values()->all();
 
-        return ['columns' => $columns, 'rows' => $rows, 'sponsors' => $sponsors, 'embellishments' => $embellishments];
+        return [
+            'columns'          => $columns,
+            'rows'             => $rows,
+            'sponsors'         => $sponsors,
+            'embellishments'   => $embellishments,
+            'lastChangedCells' => $order->last_changed_cells ?? [],
+        ];
     }
 
     protected function persistGridState(Order $order, array $state): void
@@ -94,13 +113,26 @@ trait PersistsOrderGrid
                 $attrs = [
                     'order_id'    => $order->id,
                     'product_id'  => $col['product_id'],
-                    'unit_price'  => $col['unit_price'] ?? 0,
                     'sort_order'  => $sort,
+                    'notes'       => blank($col['notes'] ?? null) ? null : $col['notes'],
                 ];
 
                 $id = $col['id'] ?? null;
-                if ($id && $order->orderItems()->whereKey($id)->exists()) {
-                    $order->orderItems()->whereKey($id)->update($attrs);
+                $existingItem = $id ? $order->orderItems()->whereKey($id)->first() : null;
+
+                // Only an admin (manage_order_pricing) can set/change unit
+                // price — club users see it but any value they submit here
+                // is ignored, either keeping the item's current price or,
+                // for a brand new item, falling back to whatever price is
+                // actually defined for it in this order's context (package
+                // kit price, club-negotiated price, or plain catalog price).
+                $attrs['unit_price'] = $this->canEditOrderPricing()
+                    ? ($col['unit_price'] ?? 0)
+                    : ($existingItem?->unit_price ?? $this->resolveDefinedUnitPrice($order, (int) $col['product_id']));
+
+                if ($existingItem) {
+                    $existingItem->update($attrs);
+                    $id = $existingItem->id;
                 } else {
                     $id = $order->orderItems()->create($attrs)->id;
                 }
@@ -128,7 +160,13 @@ trait PersistsOrderGrid
                 }
 
                 $positionId = $this->resolvePositionId($sponsor['embellishment_position_id'] ?? null);
-                $overridePrice = $this->resolveOverridePrice($sponsor['override_price'] ?? null);
+
+                // A club user's submitted override is ignored — either the
+                // existing override (if this sponsor row already had one)
+                // or none survives, never wiping out a price an admin set.
+                $overridePrice = $this->canEditOrderPricing()
+                    ? $this->resolveOverridePrice($sponsor['override_price'] ?? null)
+                    : (($sponsor['id'] ?? null) ? OrderItemSponsor::find($sponsor['id'])?->override_price : null);
 
                 $attrs = [
                     'order_item_id'              => $itemId,
@@ -168,7 +206,11 @@ trait PersistsOrderGrid
                 }
 
                 $positionId = $this->resolvePositionId($embellishment['embellishment_position_id'] ?? null);
-                $overridePrice = $this->resolveOverridePrice($embellishment['override_price'] ?? null);
+
+                // See the matching comment in the sponsors loop above.
+                $overridePrice = $this->canEditOrderPricing()
+                    ? $this->resolveOverridePrice($embellishment['override_price'] ?? null)
+                    : (($embellishment['id'] ?? null) ? OrderItemEmbellishment::find($embellishment['id'])?->override_price : null);
 
                 $attrs = [
                     'order_item_id'              => $itemId,
@@ -193,6 +235,13 @@ trait PersistsOrderGrid
                 ->delete();
 
             $items = $order->orderItems()->with(['sponsors', 'embellishments'])->whereIn('id', $keptItemIds ?: [0])->get()->keyBy('id');
+
+            if (in_array($order->order_kind, ['bulk', 'forecast'], true)) {
+                $this->persistBulkCells($order, $rows->first() ?? [], $columnKeyToId, $items);
+                $order->recalculateTotal();
+
+                return;
+            }
 
             $keptRowIds = [];
 
@@ -254,6 +303,112 @@ trait PersistsOrderGrid
 
             $order->recalculateTotal();
         });
+    }
+
+    /**
+     * Bulk Order / Forecast has no named players — everything lives on one
+     * implicit OrderPlayerRow (created here if it doesn't exist yet, and
+     * any extras pruned defensively even though the client only ever sends
+     * one), with a qty-per-size OrderItemCell per item instead of a single
+     * size+qty cell per (player, item) pair.
+     *
+     * @param  array<string, int>  $columnKeyToId
+     */
+    private function persistBulkCells(Order $order, array $rowState, array $columnKeyToId, $items): void
+    {
+        $attrs = [
+            'order_id'     => $order->id,
+            'player_index' => 0,
+            'player_name'  => null,
+            'number'       => null,
+            'initials'     => null,
+            'notes'        => null,
+        ];
+
+        $id = $rowState['id'] ?? null;
+        $row = $id ? $order->playerRows()->whereKey($id)->first() : null;
+        $row ??= $order->playerRows()->first();
+
+        if ($row) {
+            $row->update($attrs);
+            $id = $row->id;
+        } else {
+            $id = $order->playerRows()->create($attrs)->id;
+        }
+
+        $order->playerRows()->where('id', '!=', $id)->delete();
+
+        OrderItemCell::where('order_player_row_id', $id)->delete();
+
+        foreach (($rowState['cells'] ?? []) as $colKey => $cell) {
+            $itemId = $columnKeyToId[$colKey] ?? null;
+            $item = $itemId ? $items->get($itemId) : null;
+
+            if (! $item) {
+                continue;
+            }
+
+            foreach (($cell['sizes'] ?? []) as $size => $qty) {
+                $qty = max(0, (int) $qty);
+
+                if ($qty <= 0 || blank($size)) {
+                    continue;
+                }
+
+                OrderItemCell::create([
+                    'order_item_id'        => $item->id,
+                    'order_player_row_id'  => $id,
+                    'size'                 => $size,
+                    'qty'                  => $qty,
+                    'line_total'           => $item->unitCost() * $qty,
+                ]);
+            }
+        }
+    }
+
+    /**
+     * The client-side price inputs are already disabled for anyone without
+     * this permission, but that's UX only — a crafted Livewire payload
+     * could still submit different numbers, so every price field is
+     * re-checked against this server-side before it's persisted.
+     */
+    private function canEditOrderPricing(): bool
+    {
+        return auth()->user()?->can('manage_order_pricing') ?? false;
+    }
+
+    /**
+     * The price a brand new item should get when the submitting user can't
+     * set one themselves — sourced from wherever this order's type actually
+     * defines it: a package's per-item kit price, a club's Online Store
+     * Price for club-items orders, or the product's plain catalog price for
+     * individual orders (also the fallback if no package/club price is set).
+     */
+    private function resolveDefinedUnitPrice(Order $order, int $productId): float
+    {
+        if ($order->type === 'package' && $order->package_id) {
+            $pivotPrice = $order->package?->products()
+                ->where('products.id', $productId)
+                ->first()?->pivot->per_item_price;
+
+            if ($pivotPrice !== null) {
+                return (float) $pivotPrice;
+            }
+        }
+
+        if ($order->type === 'club_items' && $order->club_id) {
+            // The grid auto-fills from this same field (ClubResource's
+            // "Assigned Items > Online Store Price") — see clubItemsCatalogForGrid().
+            $pivotPrice = $order->club?->products()
+                ->where('products.id', $productId)
+                ->first()?->pivot->online_store_price;
+
+            if ($pivotPrice !== null) {
+                return (float) $pivotPrice;
+            }
+        }
+
+        return (float) (Product::find($productId)?->retail_price ?? 0);
     }
 
     /**

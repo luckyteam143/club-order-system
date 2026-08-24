@@ -31,12 +31,20 @@ class CreateOrder extends CreateRecord
         $this->gridState = json_decode($data['grid_state'] ?? '{}', true) ?: ['columns' => [], 'rows' => []];
         unset($data['grid_state']);
 
+        $data['created_by'] = auth()->id();
+
         return $data;
     }
 
     protected function afterCreate(): void
     {
         $this->persistGridState($this->record, $this->gridState ?? ['columns' => [], 'rows' => []]);
+
+        activity('order')
+            ->causedBy(auth()->user())
+            ->performedOn($this->record)
+            ->withChanges(['attributes' => ['status' => $this->record->status], 'old' => []])
+            ->log('Order created with status '.(OrderResource::STATUSES[$this->record->status] ?? $this->record->status));
 
         // See EditOrder::afterSave() — clears the grid's local-storage
         // recovery snapshot for the "create" page slot the moment this

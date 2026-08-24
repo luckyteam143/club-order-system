@@ -8,6 +8,8 @@ use App\Models\Product;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Get;
+use Filament\Forms\Set;
+use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -47,6 +49,7 @@ class PackageResource extends Resource
                 Forms\Components\Repeater::make('items')
                     ->label('Items')
                     ->schema([
+                        Forms\Components\Hidden::make('id'),
                         Forms\Components\Select::make('product_id')
                             ->label('Product')
                             ->helperText('Only items assigned to this package\'s club (see the Clubs page) are offered — select a club above first.')
@@ -73,11 +76,30 @@ class PackageResource extends Resource
                                     ->pluck('name', 'id');
                             })
                             ->getOptionLabelUsing(fn ($value) => Product::find($value)?->name)
-                            ->disableOptionsWhenSelectedInSiblingRepeaterItems(),
+                            ->reactive()
+                            ->afterStateUpdated(function ($state, Set $set, Get $get) {
+                                $clubId = $get('../../club_id');
+
+                                if (blank($clubId) || blank($state)) {
+                                    return;
+                                }
+
+                                $clubPrice = \App\Models\Club::find($clubId)
+                                    ?->products()
+                                    ->where('products.id', $state)
+                                    ->first()
+                                    ?->pivot
+                                    ?->club_price;
+
+                                if (filled($clubPrice)) {
+                                    $set('per_item_price', $clubPrice);
+                                }
+                            }),
                         Forms\Components\TextInput::make('qty')
                             ->label('Qty')->numeric()->default(1)->minValue(1),
                         Forms\Components\TextInput::make('per_item_price')
-                            ->label('Price Override')->numeric()->prefix('$')->nullable(),
+                            ->label('Price Override')->numeric()->prefix('$')->nullable()
+                            ->helperText('Auto-filled from the club\'s price for this item — edit to override.'),
                     ])
                     ->columns(3)
                     ->columnSpanFull()
@@ -188,8 +210,71 @@ class PackageResource extends Resource
                 Tables\Filters\SelectFilter::make('status')->options(['active' => 'Active', 'inactive' => 'Inactive']),
                 Tables\Filters\SelectFilter::make('club')->relationship('club', 'name'),
             ])
-            ->actions([Tables\Actions\EditAction::make()])
+            ->actions([
+                Tables\Actions\EditAction::make(),
+                Tables\Actions\Action::make('duplicate')
+                    ->label('Duplicate')
+                    ->icon('heroicon-o-document-duplicate')
+                    ->color('gray')
+                    ->requiresConfirmation()
+                    ->modalDescription('Creates a new package with the same products, sponsor logos, and embellishments.')
+                    ->action(function ($record, $livewire) {
+                        $duplicate = static::duplicatePackage($record);
+
+                        Notification::make()->title('Package duplicated')->success()->send();
+
+                        $livewire->redirect(static::getUrl('edit', ['record' => $duplicate]));
+                    }),
+            ])
             ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])]);
+    }
+
+    /**
+     * Deep-copies a package's products (with their sponsor logo and
+     * embellishment assignments, in the same order) into a brand-new
+     * package — nothing about the source package is touched.
+     */
+    public static function duplicatePackage(Package $source): Package
+    {
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($source) {
+            $source->loadMissing(['packageProducts.sponsors', 'packageProducts.embellishments']);
+
+            $duplicate = Package::create([
+                'name'    => $source->name,
+                'club_id' => $source->club_id,
+                'price'   => $source->price,
+                'status'  => $source->status,
+                'is_copy' => true,
+            ]);
+
+            foreach ($source->packageProducts as $packageProduct) {
+                $newPackageProduct = $duplicate->packageProducts()->create([
+                    'product_id'     => $packageProduct->product_id,
+                    'sort_order'     => $packageProduct->sort_order,
+                    'qty'            => $packageProduct->qty,
+                    'per_item_price' => $packageProduct->per_item_price,
+                ]);
+
+                foreach ($packageProduct->sponsors as $sponsor) {
+                    $newPackageProduct->sponsors()->create([
+                        'sponsor_logo_id'           => $sponsor->sponsor_logo_id,
+                        'embellishment_position_id' => $sponsor->embellishment_position_id,
+                        'brochure_link'             => $sponsor->brochure_link,
+                        'override_price'            => $sponsor->override_price,
+                    ]);
+                }
+
+                foreach ($packageProduct->embellishments as $embellishment) {
+                    $newPackageProduct->embellishments()->create([
+                        'embellishment_id'          => $embellishment->embellishment_id,
+                        'embellishment_position_id' => $embellishment->embellishment_position_id,
+                        'override_price'            => $embellishment->override_price,
+                    ]);
+                }
+            }
+
+            return $duplicate;
+        });
     }
 
     public static function getRelations(): array
@@ -208,6 +293,6 @@ class PackageResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin();
+        return auth()->user()?->can('manage_packages') ?? false;
     }
 }

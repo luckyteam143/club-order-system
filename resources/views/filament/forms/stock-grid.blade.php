@@ -5,6 +5,7 @@
         statePath: 'gridState',
         warehouses: @js($warehouses),
         initial: @js($initial),
+        initialSearch: @js($initialSearch ?? ''),
     })"
     x-init="init()"
     class="fi-stock-grid"
@@ -95,6 +96,11 @@ function stockGrid(config) {
             Object.values(this.pendingEdits).forEach(state => {
                 state.cells = { ...(state.cells || {}) };
             });
+
+            if (config.initialSearch) {
+                this.searchQuery = config.initialSearch;
+                this.onSearchInput();
+            }
         },
 
         productLabel(p) {

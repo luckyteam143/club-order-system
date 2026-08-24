@@ -42,12 +42,9 @@ class StockImport implements SkipsOnFailure, ToCollection, WithChunkReading, Wit
                     continue;
                 }
 
-                $qty = max(0, (int) ($row['qty'] ?? 0));
+                $qty = (int) ($row['qty'] ?? 0);
 
-                ProductWarehouseStock::updateOrCreate(
-                    ['product_id' => $product->id, 'warehouse_id' => $warehouse->id],
-                    ['qty' => $qty],
-                );
+                ProductWarehouseStock::applyQty($product->id, $warehouse->id, $qty);
 
                 $touchedProductIds[$product->id] = true;
             }

@@ -9,6 +9,7 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class ProductResource extends Resource
 {
@@ -100,22 +101,35 @@ class ProductResource extends Resource
                 Tables\Columns\TextColumn::make('default_sku')->label('Default SKU')->searchable()->toggleable(),
                 Tables\Columns\TextColumn::make('size')->searchable(),
                 Tables\Columns\TextColumn::make('parent_sku')->label('Parent SKU')->searchable()->toggleable(),
-                Tables\Columns\BadgeColumn::make('status')
-                    ->colors(['success' => 'Active', 'danger' => 'Inactive']),
-                Tables\Columns\TextColumn::make('macro_category')->label('Macro Category')->searchable()->toggleable(),
-                Tables\Columns\TextColumn::make('qty')->label('Stock')->numeric()->sortable()
-                    ->color(fn ($record) => match(true) {
-                        $record->qty === 0 => 'danger',
-                        $record->qty <= 5  => 'warning',
-                        default            => 'success',
-                    }),
-                Tables\Columns\IconColumn::make('on_backorder')->label('Backorder')->boolean(),
-                Tables\Columns\TextColumn::make('retail_price')->label('Price')->money('CAD')->sortable(),
+                Tables\Columns\TextColumn::make('barcode')->label('Barcode')->searchable()->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\ViewColumn::make('status')
+                    ->view('filament.tables.columns.products-editable-cell')
+                    ->viewData(['type' => 'select', 'options' => ['Active' => 'Active', 'Inactive' => 'Inactive']])
+                    ->sortable(),
+                Tables\Columns\ViewColumn::make('macro_category')->label('Macro Category')
+                    ->view('filament.tables.columns.products-editable-cell')
+                    ->viewData(['type' => 'text'])
+                    ->searchable()->toggleable(),
+                Tables\Columns\ViewColumn::make('qty')->label('Stock')
+                    ->view('filament.tables.columns.products-editable-cell')
+                    ->viewData(['type' => 'number'])
+                    ->sortable(),
+                Tables\Columns\ViewColumn::make('on_backorder')->label('Backorder')
+                    ->view('filament.tables.columns.products-editable-cell')
+                    ->viewData(['type' => 'checkbox', 'format' => fn ($value) => $value ? 'Yes' : 'No']),
+                Tables\Columns\ViewColumn::make('retail_price')->label('Price')
+                    ->view('filament.tables.columns.products-editable-cell')
+                    ->viewData(['type' => 'number', 'step' => '0.01', 'format' => fn ($value) => '$'.number_format((float) $value, 2)])
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('coSponsorship.name')->label('Co-Sponsorship')->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('attributes.name')->label('Attributes')->badge()->toggleable(),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
+                Tables\Filters\Filter::make('parent_only')
+                    ->label('Parent Products Only')
+                    ->query(fn (Builder $query) => $query->whereNull('parent_sku'))
+                    ->toggle(),
                 Tables\Filters\TernaryFilter::make('on_backorder')->label('On Backorder'),
                 Tables\Filters\SelectFilter::make('status')->options(['Active' => 'Active', 'Inactive' => 'Inactive']),
                 Tables\Filters\SelectFilter::make('macro_category')
@@ -126,8 +140,70 @@ class ProductResource extends Resource
                         ->pluck('macro_category', 'macro_category')
                         ->all()),
             ])
-            ->actions([Tables\Actions\EditAction::make()])
-            ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])]);
+            ->actions([
+                Tables\Actions\Action::make('inlineEdit')
+                    ->label('Edit')
+                    ->icon('heroicon-o-pencil-square')
+                    ->action(fn ($record, $livewire) => $livewire->dispatch('start-inline-edit', ids: [$record->getKey()])),
+                Tables\Actions\EditAction::make()->label('Full Edit'),
+            ])
+            ->bulkActions([Tables\Actions\BulkActionGroup::make([
+                Tables\Actions\BulkAction::make('inlineEdit')
+                    ->label('Inline Edit')
+                    ->icon('heroicon-o-pencil-square')
+                    ->action(fn ($records, $livewire) => $livewire->dispatch('start-inline-edit', ids: $records->pluck('id')->all()))
+                    ->deselectRecordsAfterCompletion(),
+                Tables\Actions\BulkAction::make('bulkUpdate')
+                    ->label('Bulk Update')
+                    ->icon('heroicon-o-pencil-square')
+                    ->form([
+                        Forms\Components\Select::make('status')
+                            ->options(['Active' => 'Active', 'Inactive' => 'Inactive'])
+                            ->placeholder('Leave unchanged'),
+                        Forms\Components\TextInput::make('macro_category')
+                            ->label('Macro Category')
+                            ->placeholder('Leave unchanged'),
+                        Forms\Components\Select::make('on_backorder')
+                            ->label('On Backorder')
+                            ->options(['1' => 'Yes', '0' => 'No'])
+                            ->placeholder('Leave unchanged'),
+                        Forms\Components\TextInput::make('retail_price')
+                            ->label('Retail Price')
+                            ->numeric()
+                            ->prefix('$')
+                            ->placeholder('Leave unchanged'),
+                        Forms\Components\TextInput::make('qty')
+                            ->label('Stock Qty')
+                            ->numeric()
+                            ->placeholder('Leave unchanged'),
+                    ])
+                    ->action(function (\Illuminate\Support\Collection $records, array $data) {
+                        $updates = [];
+
+                        foreach (['status', 'macro_category', 'on_backorder', 'retail_price', 'qty'] as $field) {
+                            $value = $data[$field] ?? null;
+
+                            if ($value === null || $value === '') {
+                                continue;
+                            }
+
+                            $updates[$field] = $field === 'on_backorder' ? (bool) $value : $value;
+                        }
+
+                        if (empty($updates)) {
+                            return;
+                        }
+
+                        $records->each(fn (Product $record) => $record->update($updates));
+                    })
+                    ->deselectRecordsAfterCompletion()
+                    ->successNotificationTitle('Products updated'),
+                Tables\Actions\DeleteBulkAction::make(),
+            ])])
+            // Otherwise Filament defaults a whole-row click to the first
+            // available view/edit action's URL — here that's "Full Edit",
+            // which fights with clicking inside a row to start inline edits.
+            ->recordUrl(null);
     }
 
     public static function getRelations(): array
@@ -146,6 +222,6 @@ class ProductResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin();
+        return auth()->user()?->can('manage_products') ?? false;
     }
 }

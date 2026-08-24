@@ -14,26 +14,29 @@ class DatabaseSeeder extends Seeder
 
     public function run(): void
     {
-        User::create([
+        $admin = User::create([
             'name'     => 'Admin',
             'email'    => 'admin@example.com',
             'password' => Hash::make('password'),
-            'role'     => 'admin',
         ]);
+        $admin->assignRole('master_admin');
 
         $this->call(WorkbookSeeder::class);
 
-        // One login per seeded club, for testing the club-facing side.
+        // One master_club login per seeded club, for testing the club-facing side.
         Club::each(function (Club $club) {
-            User::firstOrCreate(
+            $user = User::firstOrCreate(
                 ['email' => $club->email],
                 [
                     'name'     => $club->name.' Manager',
                     'password' => Hash::make('password'),
-                    'role'     => 'club',
                     'club_id'  => $club->id,
                 ],
             );
+
+            if ($user->roles->isEmpty()) {
+                $user->assignRole('master_club');
+            }
         });
     }
 }

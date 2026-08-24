@@ -60,6 +60,6 @@ class EmbellishmentResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin();
+        return auth()->user()?->can('manage_embellishments') ?? false;
     }
 }

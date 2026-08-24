@@ -3,12 +3,16 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Spatie\Activitylog\Models\Concerns\LogsActivity;
+use Spatie\Activitylog\Support\LogOptions;
 
 class Package extends Model
 {
-    protected $fillable = ['name', 'club_id', 'price', 'status'];
+    use LogsActivity;
 
-    protected $casts = ['price' => 'decimal:2'];
+    protected $fillable = ['name', 'club_id', 'price', 'status', 'is_copy'];
+
+    protected $casts = ['price' => 'decimal:2', 'is_copy' => 'boolean'];
 
     public function club(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
@@ -31,5 +35,15 @@ class Package extends Model
     public function orders(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(Order::class);
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logOnly(['name', 'club_id', 'price', 'status'])
+            ->logOnlyDirty()
+            ->dontLogEmptyChanges()
+            ->useLogName('package')
+            ->setDescriptionForEvent(fn (string $eventName) => "Package \"{$this->name}\" has been {$eventName}");
     }
 }

@@ -15,12 +15,18 @@ class StatsOverview extends BaseWidget
         $user = auth()->user();
 
         if ($user?->isClub()) {
-            $orders = Order::where('club_id', $user->club_id);
+            $orders = $user->isClubSubUser()
+                ? Order::where('created_by', $user->id)
+                : Order::where('club_id', $user->club_id);
+
             return [
-                Stat::make('My Orders', $orders->count()),
-                Stat::make('Draft Orders', (clone $orders)->where('status', 'draft')->count()),
-                Stat::make('Submitted Orders', (clone $orders)->where('status', 'submitted')->count()),
-                Stat::make('Total Spent', '$' . number_format((clone $orders)->where('status', 'completed')->sum('total'), 2)),
+                Stat::make('Total Orders', $orders->count()),
+                Stat::make('Draft', (clone $orders)->where('status', 'draft')->count())
+                    ->color('gray'),
+                Stat::make('Submitted', (clone $orders)->where('status', 'submitted')->count())
+                    ->color('primary'),
+                Stat::make('Completed', (clone $orders)->where('status', 'completed')->count())
+                    ->color('success'),
             ];
         }
 

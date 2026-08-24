@@ -3,9 +3,13 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Spatie\Activitylog\Models\Concerns\LogsActivity;
+use Spatie\Activitylog\Support\LogOptions;
 
 class Product extends Model
 {
+    use LogsActivity;
+
     protected $fillable = [
         'barcode', 'parent_sku', 'default_sku', 'size', 'name',
         'status', 'macro_category', 'description', 'image_link', 'gallery_links',
@@ -39,7 +43,9 @@ class Product extends Model
 
     public function attributes(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
-        return $this->belongsToMany(Attribute::class)->withTimestamps();
+        return $this->belongsToMany(Attribute::class)->withTimestamps()
+            ->orderBy('attributes.position')
+            ->orderBy('attributes.name');
     }
 
     public function orderItems(): \Illuminate\Database\Eloquent\Relations\HasMany
@@ -70,6 +76,25 @@ class Product extends Model
         }
 
         $this->update(['qty' => (int) $this->warehouseStocks()->sum('qty')]);
+    }
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        // qty is excluded — it's auto-synced from ProductWarehouseStock via
+        // recalculateStock() on every stock movement, which already gets
+        // its own log entry there; logging it here too would double up.
+        return LogOptions::defaults()
+            ->logOnly([
+                'barcode', 'parent_sku', 'default_sku', 'size', 'name',
+                'status', 'macro_category', 'description', 'image_link', 'gallery_links',
+                'year', 'available_until_year', 'total_look', 'weight',
+                'color1_code', 'color1_label', 'color2_code', 'color2_label',
+                'co_sponsorship_id', 'on_backorder', 'backorder_date', 'retail_price',
+            ])
+            ->logOnlyDirty()
+            ->dontLogEmptyChanges()
+            ->useLogName('product')
+            ->setDescriptionForEvent(fn (string $eventName) => "Product \"{$this->name}\" has been {$eventName}");
     }
 
     public function getStockStatusAttribute(): string

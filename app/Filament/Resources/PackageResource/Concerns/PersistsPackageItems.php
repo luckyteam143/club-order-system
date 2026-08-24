@@ -18,7 +18,11 @@ use Illuminate\Support\Facades\DB;
  * Sponsor Logos / Embellishments are their own top-level repeaters (mirrors
  * the Order page's layout) rather than nested under each item, so each row
  * references its item by product_id and gets resolved to the matching
- * package_product row at save time.
+ * package_product row at save time. When the same product appears in more
+ * than one item row, a sponsor/embellishment targeting it applies to
+ * whichever of those rows is processed last — the same product can be
+ * listed multiple times (e.g. different qty/price), but its sponsor/
+ * embellishment assignments aren't tracked per individual row.
  */
 trait PersistsPackageItems
 {
@@ -32,8 +36,9 @@ trait PersistsPackageItems
             return [];
         }
 
-        return $package->packageProducts()->get()
+        return $package->packageProducts()->orderBy('sort_order')->get()
             ->map(fn (PackageProduct $packageProduct) => [
+                'id'             => $packageProduct->id,
                 'product_id'     => $packageProduct->product_id,
                 'qty'            => $packageProduct->qty,
                 'per_item_price' => $packageProduct->per_item_price,
@@ -83,7 +88,7 @@ trait PersistsPackageItems
             $keptPackageProductIds = [];
             $productIdToPackageProductId = [];
 
-            foreach ($items as $item) {
+            foreach ($items as $index => $item) {
                 $productId = $item['product_id'] ?? null;
 
                 if (blank($productId)) {
@@ -93,13 +98,19 @@ trait PersistsPackageItems
                 $attrs = [
                     'package_id'     => $package->id,
                     'product_id'     => (int) $productId,
+                    // The Repeater's drag-and-drop reordering only changes
+                    // its array position — this is what actually persists
+                    // that order across page loads.
+                    'sort_order'     => $index,
                     'qty'            => max(1, (int) ($item['qty'] ?? 1)),
                     'per_item_price' => filled($item['per_item_price'] ?? null) ? (float) $item['per_item_price'] : null,
                 ];
 
-                $packageProduct = PackageProduct::where('package_id', $package->id)
-                    ->where('product_id', $productId)
-                    ->first();
+                // Matched by row id (not product_id) so the same product can
+                // be added as more than one item row instead of the second
+                // occurrence silently overwriting the first.
+                $id = $item['id'] ?? null;
+                $packageProduct = $id ? PackageProduct::where('package_id', $package->id)->whereKey($id)->first() : null;
 
                 if ($packageProduct) {
                     $packageProduct->update($attrs);
@@ -108,6 +119,7 @@ trait PersistsPackageItems
                 }
 
                 $keptPackageProductIds[] = $packageProduct->id;
+                // Last row for a given product wins the sponsor/embellishment mapping.
                 $productIdToPackageProductId[(int) $productId] = $packageProduct->id;
             }
 

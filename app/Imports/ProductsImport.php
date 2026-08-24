@@ -10,18 +10,23 @@ use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Concerns\SkipsFailures;
 use Maatwebsite\Excel\Concerns\SkipsOnFailure;
 use Maatwebsite\Excel\Concerns\ToCollection;
-use Maatwebsite\Excel\Concerns\WithChunkReading;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 use Maatwebsite\Excel\Concerns\WithValidation;
 
-class ProductsImport implements SkipsOnFailure, ToCollection, WithChunkReading, WithHeadingRow, WithValidation
+/**
+ * Deliberately NOT WithChunkReading: sheets exported/edited in Excel or
+ * LibreOffice often carry a bogus "used range" that extends to the sheet's
+ * max row (e.g. from formatting whole columns) even though real data is a
+ * few hundred/thousand rows. Chunked reading re-parses the whole workbook
+ * (styles, shared strings, etc.) per chunk against that inflated row count,
+ * which can take minutes per chunk and never finish. A single unchunked
+ * read doesn't have that problem — verified at ~1s / ~55MB for a ~1,000 row
+ * product sheet, well within the 512M/600s this action already grants
+ * itself in ListProducts.
+ */
+class ProductsImport implements SkipsOnFailure, ToCollection, WithHeadingRow, WithValidation
 {
     use SkipsFailures;
-
-    public function chunkSize(): int
-    {
-        return 200;
-    }
 
     public function collection(Collection $rows): void
     {

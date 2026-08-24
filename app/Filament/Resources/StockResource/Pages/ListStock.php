@@ -4,16 +4,57 @@ namespace App\Filament\Resources\StockResource\Pages;
 
 use App\Filament\Resources\StockResource;
 use App\Imports\StockImport;
+use App\Models\Product;
+use App\Models\ProductWarehouseStock;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 
 class ListStock extends ListRecords
 {
     protected static string $resource = StockResource::class;
+
+    public function getFooter(): View
+    {
+        return view('filament.resources.stock-resource.pages.list-stock-footer');
+    }
+
+    /**
+     * Batch-commits the warehouse quantity cells touched on the listing —
+     * called only from the footer's explicit "Save Changes" button, never
+     * on keystroke.
+     *
+     * @param  array<int|string, array<string, mixed>>  $edits  productId => ['warehouse_{id}' => qty]
+     */
+    public function saveInlineEdits(array $edits): void
+    {
+        $touchedProductIds = [];
+
+        foreach ($edits as $productId => $fields) {
+            foreach ($fields as $field => $value) {
+                if (! str_starts_with($field, 'warehouse_')) {
+                    continue;
+                }
+
+                $warehouseId = (int) str_replace('warehouse_', '', $field);
+
+                ProductWarehouseStock::applyQty((int) $productId, $warehouseId, (int) $value);
+            }
+
+            $touchedProductIds[] = (int) $productId;
+        }
+
+        Product::whereIn('id', $touchedProductIds)->get()->each(fn (Product $product) => $product->recalculateStock());
+
+        Notification::make()
+            ->title(count($touchedProductIds).' product(s) updated')
+            ->success()
+            ->send();
+    }
 
     protected function getHeaderActions(): array
     {
@@ -83,6 +124,11 @@ class ListStock extends ListRecords
                 ->icon('heroicon-o-table-cells')
                 ->color('primary')
                 ->url(StockResource::getUrl('bulk')),
+            Actions\Action::make('scanner')
+                ->label('Scan Stock')
+                ->icon('heroicon-o-qr-code')
+                ->color('gray')
+                ->url(\App\Filament\Pages\StockScanner::getUrl()),
             Actions\CreateAction::make(),
         ];
     }

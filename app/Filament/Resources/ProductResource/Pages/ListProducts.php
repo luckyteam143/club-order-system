@@ -4,16 +4,62 @@ namespace App\Filament\Resources\ProductResource\Pages;
 
 use App\Filament\Resources\ProductResource;
 use App\Imports\ProductsImport;
+use App\Models\Product;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ListRecords;
+use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 
 class ListProducts extends ListRecords
 {
     protected static string $resource = ProductResource::class;
+
+    public function getFooter(): View
+    {
+        return view('filament.resources.product-resource.pages.list-products-footer');
+    }
+
+    /**
+     * Batch-commits the rows currently in inline-edit mode — called only
+     * from the footer's explicit "Save Changes" button, never on keystroke,
+     * so an in-progress edit is never persisted until the user asks for it.
+     *
+     * @param  array<int|string, array<string, mixed>>  $edits  productId => [field => value]
+     */
+    public function saveInlineEdits(array $edits): void
+    {
+        $editableFields = ['status', 'macro_category', 'qty', 'retail_price', 'on_backorder'];
+
+        foreach ($edits as $productId => $fields) {
+            $product = Product::find($productId);
+
+            if (! $product) {
+                continue;
+            }
+
+            $updates = [];
+
+            foreach ($editableFields as $field) {
+                if (! array_key_exists($field, $fields)) {
+                    continue;
+                }
+
+                $updates[$field] = $field === 'on_backorder' ? (bool) $fields[$field] : $fields[$field];
+            }
+
+            if ($updates) {
+                $product->update($updates);
+            }
+        }
+
+        Notification::make()
+            ->title(count($edits).' product(s) updated')
+            ->success()
+            ->send();
+    }
 
     protected function getHeaderActions(): array
     {

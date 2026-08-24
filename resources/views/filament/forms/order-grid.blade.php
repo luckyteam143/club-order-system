@@ -2,6 +2,23 @@
     $initial = json_decode($getState() ?: '{}', true) ?: ['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => []];
 @endphp
 
+<style>
+    /*
+        Filament wraps a full-width form field (this one included) in a
+        CSS Grid item spanning the whole row (class "col-[--col-span-default]").
+        Grid/flex items default to min-width:auto, which refuses to shrink
+        below their content's natural width — with a wide item-column grid
+        inside, that meant THIS wrapper just grew wider than the page
+        instead of our own overflow-x-auto div ever getting a chance to
+        scroll internally, so the whole page scrolled and nothing stayed
+        pinned. A full-row-span item never needs to resist shrinking, so
+        this is safe to loosen site-wide.
+    */
+    .col-\[--col-span-default\] {
+        min-width: 0;
+    }
+</style>
+
 <div
     wire:key="order-item-grid"
     wire:ignore
@@ -14,10 +31,11 @@
         embellishmentPositions: @js($embellishmentPositions),
         packages: @js($packages),
         clubItems: @js($clubItems),
+        canEditPrices: @js($canEditPrices),
     })"
     x-init="init()"
     x-on:order-grid-saved.window="onFormSaved()"
-    class="fi-order-grid"
+    class="fi-order-grid min-w-0"
 >
     <div x-show="localDraftAvailable" x-cloak
         class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning-300 dark:border-warning-800 bg-warning-50 dark:bg-warning-950 px-3 py-2 text-sm">
@@ -61,79 +79,187 @@
         </p>
     </div>
 
-    <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-        <table class="w-full text-sm border-collapse">
-            <thead class="bg-gray-50 dark:bg-gray-800 sticky top-0 z-10">
-                <tr>
-                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[10rem]">Player Name</th>
-                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium w-20">Number</th>
-                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium w-20">Initials</th>
+    <!--
+        Three genuinely separate blocks side by side (not one table/grid
+        with `position: sticky`) — sticky-in-a-scroll-container kept
+        failing in practice, so instead: Player/Number/Initials (left) and
+        Notes/Row Total/Actions (right) each live in their own div that is
+        never inside any scrolling element, so it is physically impossible
+        for them to scroll. Only the middle block (item columns) has
+        `overflow-x-auto`. Being 3 separate DOM trees, they don't sync row
+        heights via normal CSS — `syncHeaderHeight()` (below) measures the
+        middle block's real rendered header height (which varies with
+        product name length, capped at 2 lines via `line-clamp-2`) and
+        mirrors it onto the other two panels' headers via `headerHeight`,
+        re-running whenever a column is added/removed/changed. Body rows
+        need no such syncing: every panel's row cells use identical
+        single-line inputs with identical padding, so they're naturally
+        the same height already.
+    -->
+    <!--
+        Bulk Order / Forecast: no named players at all, so instead of the
+        player-rows spreadsheet below, this is just "how many of each size
+        per item" — one implicit row behind the scenes (see ensureBulkRow()
+        in the script), rendered here as a plain item-per-row table.
+    -->
+    <div x-show="isBulkType()" x-cloak class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-200 bg-gray-50 text-left dark:border-gray-700 dark:bg-gray-800">
+                    <th class="p-2 font-medium text-gray-500 dark:text-gray-400">Item</th>
+                    <th class="p-2 font-medium text-gray-500 dark:text-gray-400">Quantity by Size</th>
+                    <th class="p-2 font-medium text-gray-500 dark:text-gray-400">Notes</th>
+                    <th class="p-2 text-right font-medium text-gray-500 dark:text-gray-400">Item Total</th>
+                    <th class="w-8 p-2"></th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="col in columns" :key="col.key">
+                    <tr class="border-b border-gray-100 dark:border-gray-800">
+                        <td class="p-2 align-top">
+                            <input type="text" list="order-grid-products" autocomplete="off"
+                                :name="'bulk_product_' + col.key" :id="'bulk_product_' + col.key"
+                                :value="productName(col.product_id)"
+                                @change="onProductInput($event, col)"
+                                placeholder="Type to search / change…"
+                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                        </td>
+                        <td class="p-2">
+                            <div class="flex flex-wrap gap-3">
+                                <template x-for="size in productSizes(col)" :key="size">
+                                    <label class="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
+                                        <span x-text="size" class="font-medium"></span>
+                                        <input type="number" min="0" step="1" autocomplete="off"
+                                            :name="'bulk_qty_' + col.key + '_' + size"
+                                            :value="bulkQty(col, size)"
+                                            @input="setBulkQty(col, size, $event.target.value)"
+                                            class="fi-input w-16 rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                                    </label>
+                                </template>
+                                <span x-show="col.product_id && !productSizes(col).length" class="text-xs text-gray-400">No sizes defined for this item.</span>
+                                <span x-show="!col.product_id" class="text-xs text-gray-400">Pick an item to see its sizes.</span>
+                            </div>
+                        </td>
+                        <td class="p-2 align-top">
+                            <input type="text" x-model="col.notes" @input="sync()" autocomplete="off"
+                                :name="'bulk_notes_' + col.key" :id="'bulk_notes_' + col.key"
+                                placeholder="Notes for this item…"
+                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                        </td>
+                        <td class="p-2 text-right align-top tabular-nums" x-text="bulkItemTotal(col)"></td>
+                        <td class="p-2 align-top text-center">
+                            <button type="button" x-show="canManageColumns()" @click="removeColumn(col.key)" class="text-gray-400 hover:text-danger-600" title="Remove item">🗑</button>
+                        </td>
+                    </tr>
+                </template>
+                <tr x-show="!columns.length">
+                    <td colspan="5" class="p-3 text-center text-sm text-gray-500 dark:text-gray-400">No items yet — use "+ Add Item Column" above.</td>
+                </tr>
+            </tbody>
+            <tfoot x-show="columns.length">
+                <tr class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
+                    <td class="p-2 font-semibold" colspan="3">Grand Total</td>
+                    <td class="p-2 text-right font-semibold tabular-nums" x-text="bulkGrandTotal()"></td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
 
-                    <template x-for="col in columns" :key="col.key">
-                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 align-top min-w-[12rem]">
-                            <div class="flex items-start justify-between gap-1">
+    <div x-show="!isBulkType()" class="flex items-stretch overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700"
+        x-effect="columns.map((c) => c.product_id).join('|'); syncHeaderHeight()">
+        <!-- LEFT: Player Name / Number / Initials — fixed, never scrolls -->
+        <div class="grid shrink-0 border-r border-gray-200 text-sm dark:border-gray-700"
+            style="grid-template-columns: 10rem 5rem 5rem">
+            <div class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 text-left font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Player Name</div>
+            <div class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 text-left font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Number</div>
+            <div class="border-b border-gray-200 bg-gray-50 px-2 py-2 text-left font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Initials</div>
+
+            <template x-for="(row, rowIndex) in rows" :key="row.key">
+                <div style="display: contents">
+                    <div class="border-b border-r border-gray-100 p-1 dark:border-gray-800"
+                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
+                        <input type="text" x-model="row.player_name" placeholder="Player name" autocomplete="off"
+                            :name="'player_name_' + rowIndex" :id="'player_name_' + rowIndex"
+                            :data-row="rowIndex" data-col="player_name"
+                            @keydown.enter.prevent="navigate($event, 'down', true)"
+                            @keydown.down.prevent="navigate($event, 'down')"
+                            @keydown.up.prevent="navigate($event, 'up')"
+                            @paste="onPaste($event, rowIndex, 'player_name')"
+                            @input="row.player_name = row.player_name.toUpperCase(); sync()"
+                            class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                    </div>
+                    <div class="border-b border-r border-gray-100 p-1 dark:border-gray-800"
+                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
+                        <input type="text" x-model="row.number" placeholder="#" autocomplete="off"
+                            :name="'number_' + rowIndex" :id="'number_' + rowIndex"
+                            :data-row="rowIndex" data-col="number"
+                            @keydown.enter.prevent="navigate($event, 'down', true)"
+                            @keydown.down.prevent="navigate($event, 'down')"
+                            @keydown.up.prevent="navigate($event, 'up')"
+                            @paste="onPaste($event, rowIndex, 'number')"
+                            @input="sync()"
+                            class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                    </div>
+                    <div class="border-b border-gray-100 p-1 dark:border-gray-800"
+                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
+                        <input type="text" x-model="row.initials" placeholder="Init." autocomplete="off"
+                            :name="'initials_' + rowIndex" :id="'initials_' + rowIndex"
+                            :data-row="rowIndex" data-col="initials"
+                            @keydown.enter.prevent="navigate($event, 'down', true)"
+                            @keydown.down.prevent="navigate($event, 'down')"
+                            @keydown.up.prevent="navigate($event, 'up')"
+                            @paste="onPaste($event, rowIndex, 'initials')"
+                            @input="row.initials = row.initials.toUpperCase(); sync()"
+                            class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                    </div>
+                </div>
+            </template>
+
+            <!-- Matches the height of the middle block's mirrored scrollbar row so the footer row below stays aligned across all three blocks. -->
+            <div class="h-4 border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" style="grid-column: span 3"></div>
+            <div class="border-t border-gray-200 bg-gray-50 px-2 py-2 font-semibold dark:border-gray-700 dark:bg-gray-800" style="grid-column: span 3">Grand Total</div>
+        </div>
+
+        <!-- MIDDLE: item columns — the only thing that scrolls -->
+        <div class="min-w-0 flex-1 overflow-x-auto"
+            x-ref="hScroll" @scroll="if ($refs.hScrollMirror) $refs.hScrollMirror.scrollLeft = $event.target.scrollLeft">
+            <div class="grid text-sm" :style="'grid-template-columns: repeat(' + columns.length + ', 9rem)'">
+                <template x-for="col in columns" :key="col.key">
+                    <div x-ref="itemHeaderCell" class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 dark:border-gray-700 dark:bg-gray-800">
+                        <div class="flex items-start justify-between gap-1">
+                            <div class="min-w-0 flex-1">
+                                <p class="line-clamp-2 whitespace-normal break-words text-xs font-semibold leading-snug text-gray-900 dark:text-gray-100"
+                                    x-text="productName(col.product_id) || 'No item selected'"></p>
                                 <input type="text" list="order-grid-products" autocomplete="off"
                                     :name="'product_' + col.key" :id="'product_' + col.key"
                                     :value="productName(col.product_id)"
                                     @change="onProductInput($event, col)"
-                                    placeholder="Type to search product…"
-                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs font-semibold">
-                                <button type="button" x-show="canManageColumns()" @click="removeColumn(col.key)"
-                                    class="shrink-0 text-gray-400 hover:text-danger-600" title="Remove item">✕</button>
+                                    placeholder="Type to search / change…"
+                                    class="fi-input mt-1 w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs">
                             </div>
-                            <div class="mt-1 flex items-center gap-1">
-                                <span class="text-xs text-gray-500">$</span>
-                                <input type="number" step="0.01" x-model.number="col.unit_price" autocomplete="off"
-                                    :name="'unit_price_' + col.key" :id="'unit_price_' + col.key"
-                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs">
-                            </div>
-                        </th>
-                    </template>
+                            <button type="button" x-show="canManageColumns()" @click="removeColumn(col.key)"
+                                class="shrink-0 text-gray-400 hover:text-danger-600" title="Remove item">✕</button>
+                        </div>
+                        <div class="mt-1 flex items-center gap-1">
+                            <span class="text-xs text-gray-500">$</span>
+                            <input type="number" step="0.01" x-model.number="col.unit_price" autocomplete="off"
+                                :name="'unit_price_' + col.key" :id="'unit_price_' + col.key"
+                                :disabled="!canEditPrices" :title="!canEditPrices ? 'Only an admin can change pricing' : null"
+                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs disabled:cursor-not-allowed disabled:opacity-60">
+                        </div>
+                    </div>
+                </template>
 
-                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[10rem]">Notes</th>
-                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-right font-medium w-24">Row Total</th>
-                    <th class="border-b border-gray-200 dark:border-gray-700 px-2 py-2 w-10"></th>
-                </tr>
-            </thead>
-            <tbody>
                 <template x-for="(row, rowIndex) in rows" :key="row.key">
-                    <tr class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
-                        <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                            <input type="text" x-model="row.player_name" placeholder="Player name" autocomplete="off"
-                                :name="'player_name_' + rowIndex" :id="'player_name_' + rowIndex"
-                                :data-row="rowIndex" data-col="player_name"
-                                @keydown.enter.prevent="navigate($event, 'down', true)"
-                                @keydown.down.prevent="navigate($event, 'down')"
-                                @keydown.up.prevent="navigate($event, 'up')"
-                                @paste="onPaste($event, rowIndex, 'player_name')"
-                                @input="row.player_name = row.player_name.toUpperCase(); sync()"
-                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                        </td>
-                        <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                            <input type="text" x-model="row.number" placeholder="#" autocomplete="off"
-                                :name="'number_' + rowIndex" :id="'number_' + rowIndex"
-                                :data-row="rowIndex" data-col="number"
-                                @keydown.enter.prevent="navigate($event, 'down', true)"
-                                @keydown.down.prevent="navigate($event, 'down')"
-                                @keydown.up.prevent="navigate($event, 'up')"
-                                @paste="onPaste($event, rowIndex, 'number')"
-                                @input="sync()"
-                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                        </td>
-                        <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                            <input type="text" x-model="row.initials" placeholder="Init." autocomplete="off"
-                                :name="'initials_' + rowIndex" :id="'initials_' + rowIndex"
-                                :data-row="rowIndex" data-col="initials"
-                                @keydown.enter.prevent="navigate($event, 'down', true)"
-                                @keydown.down.prevent="navigate($event, 'down')"
-                                @keydown.up.prevent="navigate($event, 'up')"
-                                @paste="onPaste($event, rowIndex, 'initials')"
-                                @input="row.initials = row.initials.toUpperCase(); sync()"
-                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                        </td>
-
+                    <div style="display: contents">
                         <template x-for="col in columns" :key="col.key">
-                            <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1" x-init="ensureCell(row, col.key)">
+                            <div class="border-b border-r border-gray-100 p-1 dark:border-gray-800"
+                                :class="isCellChanged(row.key, col.key)
+                                    ? 'ring-2 ring-inset ring-orange-400 bg-orange-50 dark:bg-orange-950/40'
+                                    : (rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40')"
+                                :title="isCellChanged(row.key, col.key) ? 'Changed in the most recent save' : null"
+                                x-init="ensureCell(row, col.key)">
                                 <input type="text" x-show="col.product_id" autocomplete="off"
                                     :list="'order-grid-sizes-' + rowIndex + '-' + col.key"
                                     :name="'size_' + rowIndex + '_' + col.key" :id="'size_' + rowIndex + '_' + col.key"
@@ -154,39 +280,71 @@
                                         <option :value="size"></option>
                                     </template>
                                 </datalist>
-                            </td>
+                            </div>
                         </template>
-
-                        <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                            <input type="text" x-model="row.notes" placeholder="Notes" autocomplete="off"
-                                :name="'notes_' + rowIndex" :id="'notes_' + rowIndex"
-                                :data-row="rowIndex" data-col="notes"
-                                @keydown.enter.prevent="navigate($event, 'down', true)"
-                                @keydown.down.prevent="navigate($event, 'down')"
-                                @keydown.up.prevent="navigate($event, 'up')"
-                                @paste="onPaste($event, rowIndex, 'notes')"
-                                @input="sync()"
-                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                        </td>
-                        <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1 text-right font-medium tabular-nums" x-text="'$' + rowTotal(row).toFixed(2)"></td>
-                        <td class="border-b border-gray-100 dark:border-gray-800 p-1 text-center whitespace-nowrap">
-                            <button type="button" @click="duplicateRow(row.key)" class="text-gray-400 hover:text-primary-600" title="Duplicate this row">⧉</button>
-                            <button type="button" @click="removeRow(row.key)" class="text-gray-400 hover:text-danger-600" title="Remove row">🗑</button>
-                        </td>
-                    </tr>
+                    </div>
                 </template>
-            </tbody>
-            <tfoot>
-                <tr class="bg-gray-50 dark:bg-gray-800 font-semibold">
-                    <td class="px-2 py-2 border-t border-gray-200 dark:border-gray-700" :colspan="3 + columns.length + 1">Grand Total</td>
-                    <td class="px-2 py-2 border-t border-gray-200 dark:border-gray-700 text-right tabular-nums" x-text="'$' + grandTotal().toFixed(2)"></td>
-                    <td class="border-t border-gray-200 dark:border-gray-700"></td>
-                </tr>
-            </tfoot>
-        </table>
+
+                <!--
+                    A second, mirrored horizontal scrollbar sitting right
+                    above Grand Total — dragging it (or the one at the
+                    bottom of this block) scrolls both together via the
+                    @scroll listeners on each, so it's reachable without
+                    scrolling all the way down a long roster first.
+                -->
+                <div x-show="columns.length" class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800"
+                    :style="'grid-column: span ' + columns.length"
+                    x-ref="hScrollMirror" @scroll="$refs.hScroll.scrollLeft = $event.target.scrollLeft">
+                    <div class="h-4" :style="'width: ' + (columns.length * 9) + 'rem'"></div>
+                </div>
+
+                <div class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" :style="'grid-column: span ' + columns.length"></div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Notes / Row Total / Actions — fixed, never scrolls -->
+        <div class="grid shrink-0 border-l border-gray-200 text-sm dark:border-gray-700"
+            style="grid-template-columns: 10rem 6rem 40px">
+            <div class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 text-left font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Notes</div>
+            <div class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 text-right font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Row Total</div>
+            <div class="border-b border-gray-200 bg-gray-50 px-2 py-2 dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'"></div>
+
+            <template x-for="(row, rowIndex) in rows" :key="row.key">
+                <div style="display: contents">
+                    <div class="border-b border-r border-gray-100 p-1 dark:border-gray-800"
+                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
+                        <input type="text" x-model="row.notes" placeholder="Notes" autocomplete="off"
+                            :name="'notes_' + rowIndex" :id="'notes_' + rowIndex"
+                            :data-row="rowIndex" data-col="notes"
+                            @keydown.enter.prevent="navigate($event, 'down', true)"
+                            @keydown.down.prevent="navigate($event, 'down')"
+                            @keydown.up.prevent="navigate($event, 'up')"
+                            @paste="onPaste($event, rowIndex, 'notes')"
+                            @input="sync()"
+                            class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                    </div>
+                    <div class="border-b border-r border-gray-100 p-1 text-right font-medium tabular-nums dark:border-gray-800"
+                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'"
+                        x-text="'$' + rowTotal(row).toFixed(2)"></div>
+                    <div class="border-b border-gray-100 p-1 text-center whitespace-nowrap dark:border-gray-800"
+                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
+                        <button type="button" @click="duplicateRow(row.key)" class="text-gray-400 hover:text-primary-600" title="Duplicate this row">⧉</button>
+                        <button type="button" @click="removeRow(row.key)" class="text-gray-400 hover:text-danger-600" title="Remove row">🗑</button>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Matches the height of the middle block's mirrored scrollbar row so the footer row below stays aligned across all three blocks. -->
+            <div class="h-4 border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" style="grid-column: span 3"></div>
+
+            <div class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800"></div>
+            <div class="border-t border-gray-200 bg-gray-50 px-2 py-2 text-right font-semibold tabular-nums dark:border-gray-700 dark:bg-gray-800"
+                x-text="'$' + grandTotal().toFixed(2)"></div>
+            <div class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800"></div>
+        </div>
     </div>
 
-    <div class="flex flex-wrap items-center gap-2 mt-2">
+    <div class="flex flex-wrap items-center gap-2 mt-2" x-show="!isBulkType()">
         <button type="button" @click="addRow()"
             class="fi-btn inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
             + Add Row
@@ -201,6 +359,44 @@
                 + Add Rows
             </button>
         </div>
+    </div>
+
+    <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700" x-show="columns.length && !isBulkType()">
+        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Item / Size Summary</h4>
+        <div class="overflow-x-auto">
+            <table class="text-sm border-collapse">
+                <thead>
+                    <tr>
+                        <th class="p-2 text-left font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">Item</th>
+                        <template x-for="size in summarySizes()" :key="size">
+                            <th class="p-2 text-center font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700" x-text="size"></th>
+                        </template>
+                        <th class="p-2 text-center font-semibold text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="col in columns" :key="col.key">
+                        <tr>
+                            <td class="p-2 pr-4 border-b border-gray-100 dark:border-gray-800 whitespace-nowrap" x-text="productName(col.product_id) || 'No item selected'"></td>
+                            <template x-for="size in summarySizes()" :key="size">
+                                <td class="p-2 text-center tabular-nums border-b border-gray-100 dark:border-gray-800" x-text="summaryCount(col, size) || '—'"></td>
+                            </template>
+                            <td class="p-2 text-center font-semibold tabular-nums border-b border-gray-100 dark:border-gray-800" x-text="summaryItemTotal(col)"></td>
+                        </tr>
+                    </template>
+                </tbody>
+                <tfoot x-show="summarySizes().length">
+                    <tr>
+                        <td class="p-2 font-semibold">Total</td>
+                        <template x-for="size in summarySizes()" :key="size">
+                            <td class="p-2 text-center font-semibold tabular-nums" x-text="summaryColumnTotal(size)"></td>
+                        </template>
+                        <td class="p-2 text-center font-semibold tabular-nums" x-text="summaryGrandTotal()"></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        <p x-show="!summarySizes().length" class="text-xs text-gray-500 dark:text-gray-400">No sizes entered yet.</p>
     </div>
 
     <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -262,8 +458,9 @@
                                 <input type="number" step="0.01" x-model.number="sponsor.override_price" autocomplete="off"
                                     :name="'sponsor_override_' + sponsor.key" :id="'sponsor_override_' + sponsor.key"
                                     placeholder="Catalog price"
+                                    :disabled="!canEditPrices" :title="!canEditPrices ? 'Only an admin can change pricing' : null"
                                     @input="sync()"
-                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm text-right">
+                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm text-right disabled:cursor-not-allowed disabled:opacity-60">
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1 text-right tabular-nums" x-text="'$' + sponsorPrice(sponsor).toFixed(2)"></td>
                             <td class="border-b border-gray-100 dark:border-gray-800 p-1 text-center">
@@ -334,8 +531,9 @@
                                 <input type="number" step="0.01" x-model.number="embellishment.override_price" autocomplete="off"
                                     :name="'embellishment_override_' + embellishment.key" :id="'embellishment_override_' + embellishment.key"
                                     placeholder="Catalog price"
+                                    :disabled="!canEditPrices" :title="!canEditPrices ? 'Only an admin can change pricing' : null"
                                     @input="sync()"
-                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm text-right">
+                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm text-right disabled:cursor-not-allowed disabled:opacity-60">
                             </td>
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1 text-right tabular-nums" x-text="'$' + embellishmentPrice(embellishment).toFixed(2)"></td>
                             <td class="border-b border-gray-100 dark:border-gray-800 p-1 text-center">
@@ -365,11 +563,37 @@ function orderGrid(config) {
         embellishmentPositions: config.embellishmentPositions,
         packages: config.packages,
         clubItems: config.clubItems,
+        canEditPrices: config.canEditPrices,
         columns: [],
         rows: [],
         sponsorRows: [],
         embellishmentRows: [],
         bulkAddCount: 5,
+
+        // Cells touched by the most recent post-submission save (see
+        // EditOrder::logOrderUpdate()) — highlighted in orange so a reviewer
+        // can see at a glance what changed since the order was submitted.
+        changedCellKeys: new Set(),
+        isCellChanged(rowKey, colKey) {
+            return this.changedCellKeys.has(rowKey + ':' + colKey);
+        },
+
+        // The left/right panels are separate DOM trees from the item
+        // columns (see the big comment above the roster markup), so their
+        // header row height can't sync via normal CSS row-sizing — this
+        // measures the item-column header's real rendered height (which
+        // varies with product name length) and mirrors it onto the other
+        // two panels' headers, instead of guessing a fixed px value that
+        // drifts out of sync the moment a name wraps to a second line.
+        headerHeight: 88,
+
+        syncHeaderHeight() {
+            this.$nextTick(() => {
+                if (this.$refs.itemHeaderCell) {
+                    this.headerHeight = Math.max(88, this.$refs.itemHeaderCell.offsetHeight);
+                }
+            });
+        },
 
         // Per-page-URL, so Create and each Order's Edit page get their own
         // recovery slot without needing anything passed from the server.
@@ -393,6 +617,7 @@ function orderGrid(config) {
             this.rows = (config.initial.rows || []).map(r => ({ ...r, cells: { ...(r.cells || {}) } }));
             this.sponsorRows = (config.initial.sponsors || []).map(s => ({ ...s }));
             this.embellishmentRows = (config.initial.embellishments || []).map(e => ({ ...e }));
+            this.changedCellKeys = new Set(config.initial.lastChangedCells || []);
 
             this.ensureAllCells();
             this.checkForLocalDraft();
@@ -497,9 +722,67 @@ function orderGrid(config) {
             return this.orderType() === 'club_items';
         },
 
+        // Order Kind (Standard/Bulk/Forecast) is a separate axis from Type
+        // (Package/Individual/Club Items) — a Bulk or Forecast order still
+        // uses whichever Type is selected to decide where item columns come
+        // from, but always renders the no-named-players "quantity per size"
+        // layout below regardless of Type.
+        orderKind() {
+            return this.$wire.data.order_kind || 'standard';
+        },
+
+        isBulkType() {
+            return ['bulk', 'forecast'].includes(this.orderKind());
+        },
+
+        // Bulk Order / Forecast has no named players — everything lives on
+        // one implicit row, and each item's cell holds a qty per size
+        // ({ sizes: { M: 5, L: 2 } }) instead of a single size+qty pair.
+        ensureBulkRow() {
+            if (this.rows.length === 0) {
+                this.rows.push({ key: this.newKey('bulk'), id: null, player_name: '', number: '', initials: '', notes: '', cells: {} });
+            }
+
+            return this.rows[0];
+        },
+
+        bulkQty(col, size) {
+            const row = this.ensureBulkRow();
+            this.ensureCell(row, col.key);
+
+            return row.cells[col.key].sizes[size] || 0;
+        },
+
+        setBulkQty(col, size, value) {
+            const row = this.ensureBulkRow();
+            this.ensureCell(row, col.key);
+
+            const qty = Math.max(0, parseInt(value) || 0);
+            if (qty > 0) {
+                row.cells[col.key].sizes[size] = qty;
+            } else {
+                delete row.cells[col.key].sizes[size];
+            }
+
+            this.sync();
+        },
+
+        bulkItemTotal(col) {
+            const row = this.rows[0];
+            if (!row || !row.cells[col.key]) return 0;
+
+            return Object.values(row.cells[col.key].sizes || {}).reduce((sum, qty) => sum + (parseInt(qty) || 0), 0);
+        },
+
+        bulkGrandTotal() {
+            return this.columns.reduce((total, col) => total + this.bulkItemTotal(col), 0);
+        },
+
         // Individual and Club Items orders both let the user pick items
         // column-by-column (Package orders derive their columns from the
-        // selected package instead).
+        // selected package instead) — this follows Type only, independent
+        // of Order Kind, so a Bulk/Forecast Package order still only gets
+        // its fixed package items via Resync, same as a standard one.
         canManageColumns() {
             return this.orderType() === 'individual' || this.isClubItemsType();
         },
@@ -511,8 +794,23 @@ function orderGrid(config) {
             if (!this.isClubItemsType()) return this.products;
 
             const clubId = this.$wire.data.club_id;
-            const allowedIds = (clubId && this.clubItems[clubId]) ? this.clubItems[clubId] : [];
-            return this.products.filter(p => allowedIds.includes(p.id));
+            const clubPrices = (clubId && this.clubItems[clubId]) ? this.clubItems[clubId] : {};
+            return this.products.filter(p => p.id in clubPrices);
+        },
+
+        // Individual orders auto-fill from the product's plain catalog
+        // price; Club Items orders from that club's Online Store Price
+        // (ClubResource > Assigned Items) instead — a club can define a
+        // different price per product than the general catalog.
+        priceForProduct(productId) {
+            if (this.isClubItemsType()) {
+                const clubId = this.$wire.data.club_id;
+                const clubPrices = (clubId && this.clubItems[clubId]) ? this.clubItems[clubId] : {};
+                if (productId in clubPrices) return clubPrices[productId];
+            }
+
+            const product = this.products.find(p => p.id == productId);
+            return product ? product.price : 0;
         },
 
         pruneColumnsOutsideClub() {
@@ -556,9 +854,17 @@ function orderGrid(config) {
         // Runs via x-init on every row×column cell as it's created, so it
         // self-heals regardless of how/when that row or column came to exist.
         ensureCell(row, colKey) {
-            if (!row.cells[colKey]) {
-                row.cells[colKey] = { size: '', qty: 1, invalid: false };
-            }
+            const expectBulkShape = this.isBulkType();
+            const existing = row.cells[colKey];
+
+            // Self-healing against switching the order Type on an unsaved
+            // form (e.g. Individual → Bulk before the first save) leaving a
+            // cell in the other mode's shape behind — re-initializes it to
+            // match whichever mode is active now instead of erroring later
+            // when bulk-mode code expects `.sizes` on an old size+qty cell.
+            if (existing && (('sizes' in existing) === expectBulkShape)) return;
+
+            row.cells[colKey] = expectBulkShape ? { sizes: {} } : { size: '', qty: 1, invalid: false };
         },
 
         ensureAllCells() {
@@ -608,7 +914,7 @@ function orderGrid(config) {
         },
 
         addColumn() {
-            const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0 };
+            const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0, notes: '' };
             this.columns.push(col);
             this.ensureAllCells();
             this.sync();
@@ -632,9 +938,10 @@ function orderGrid(config) {
         },
 
         onProductChange(col) {
-            const product = this.products.find(p => p.id == col.product_id);
-            col.unit_price = product ? product.price : 0;
-            this.rows.forEach(row => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
+            col.unit_price = col.product_id ? this.priceForProduct(col.product_id) : 0;
+            this.rows.forEach(row => {
+                row.cells[col.key] = this.isBulkType() ? { sizes: {} } : { size: '', qty: 1, invalid: false };
+            });
             this.sync();
         },
 
@@ -730,6 +1037,7 @@ function orderGrid(config) {
                 id: null,
                 product_id: item.product_id,
                 unit_price: item.price,
+                notes: '',
             }));
 
             this.rows.forEach(row => {
@@ -899,6 +1207,40 @@ function orderGrid(config) {
 
         grandTotal() {
             return this.rows.reduce((sum, row) => sum + this.rowTotal(row), 0);
+        },
+
+        // Item × size summary table — every distinct size actually entered
+        // anywhere in the roster, as columns, against each item as rows.
+        summarySizes() {
+            const sizes = new Set();
+            this.rows.forEach(row => {
+                Object.values(row.cells || {}).forEach(cell => {
+                    if (cell && cell.size) sizes.add(cell.size);
+                });
+            });
+            return Array.from(sizes).sort();
+        },
+
+        summaryCount(col, size) {
+            return this.rows.reduce((total, row) => {
+                const cell = row.cells[col.key];
+                return (cell && cell.size === size) ? total + (parseInt(cell.qty) || 0) : total;
+            }, 0);
+        },
+
+        summaryItemTotal(col) {
+            return this.rows.reduce((total, row) => {
+                const cell = row.cells[col.key];
+                return (cell && cell.size) ? total + (parseInt(cell.qty) || 0) : total;
+            }, 0);
+        },
+
+        summaryColumnTotal(size) {
+            return this.columns.reduce((total, col) => total + this.summaryCount(col, size), 0);
+        },
+
+        summaryGrandTotal() {
+            return this.columns.reduce((total, col) => total + this.summaryItemTotal(col), 0);
         },
 
         allColKeys() {

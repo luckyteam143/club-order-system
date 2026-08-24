@@ -12,7 +12,7 @@ class PackageProduct extends Pivot
 
     protected $table = 'package_product';
 
-    protected $fillable = ['package_id', 'product_id', 'qty', 'per_item_price'];
+    protected $fillable = ['package_id', 'product_id', 'sort_order', 'qty', 'per_item_price'];
 
     protected $casts = [
         'per_item_price' => 'decimal:2',
