@@ -6,6 +6,7 @@ use App\Filament\Resources\ClubResource\Pages;
 use App\Models\Club;
 use Filament\Forms;
 use Filament\Forms\Form;
+use Filament\Forms\Get;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -87,6 +88,18 @@ class ClubResource extends Resource
                             ->label('Club Price')->numeric()->prefix('$'),
                         Forms\Components\TextInput::make('online_store_price')
                             ->label('Online Store Price')->numeric()->prefix('$'),
+                        Forms\Components\Toggle::make('has_club_crest')
+                            ->label('Club Crest')
+                            ->helperText('This item carries the club badge.')
+                            ->default(true)
+                            ->live(),
+                        Forms\Components\TextInput::make('crest_number')
+                            ->label('Crest #')
+                            ->helperText('Which crest artwork (1, 2, 3…) — a club may use a different crest on the jersey vs. the shorts.')
+                            ->numeric()
+                            ->default(1)
+                            ->minValue(1)
+                            ->visible(fn (Get $get) => (bool) $get('has_club_crest')),
                     ])
                     ->columns(3)
                     ->columnSpanFull()

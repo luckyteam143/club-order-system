@@ -71,11 +71,23 @@ class StockResource extends Resource
 
         return $table
             ->query(Product::query()->where('status', 'Active')->with('warehouseStocks'))
+            // Same reason as ProductResource: ~30k rows each eager-loading a
+            // relation — an "all" page size exhausts the request memory limit.
+            ->paginated([25, 50, 100])
             ->columns([
-                Tables\Columns\TextColumn::make('name')->label('Product')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('barcode')->label('Barcode')->searchable()->toggleable(),
-                Tables\Columns\TextColumn::make('size')->label('Size')->toggleable(),
+                // The data-* cell attributes drive the mobile card layout in
+                // list-stock-footer.blade.php: below ~768px the table collapses
+                // to one card per product with each warehouse's stock stacked
+                // and labelled underneath the product name instead of scrolling
+                // off the side of a wide row.
+                Tables\Columns\TextColumn::make('name')->label('Product')->searchable()->sortable()
+                    ->extraCellAttributes(['data-mobile-heading' => 'true']),
+                Tables\Columns\TextColumn::make('barcode')->label('Barcode')->searchable()->toggleable()
+                    ->extraCellAttributes(['data-label' => 'Barcode']),
+                Tables\Columns\TextColumn::make('size')->label('Size')->toggleable()
+                    ->extraCellAttributes(['data-label' => 'Size']),
                 Tables\Columns\TextColumn::make('total_look')->label('Total Look')->toggleable()
+                    ->extraCellAttributes(['data-label' => 'Total Look'])
                     // Some values (e.g. "NO TOTAL LOOK") run long enough to
                     // stretch the whole table — cap the column width and
                     // wrap onto multiple lines instead of growing wide.
@@ -100,14 +112,17 @@ class StockResource extends Resource
                 ...$warehouses->map(fn (Warehouse $warehouse) => Tables\Columns\ViewColumn::make('warehouse_'.$warehouse->id)
                     ->label($warehouse->name)
                     ->view('filament.tables.columns.stock-editable-cell')
+                    ->extraCellAttributes(['data-label' => $warehouse->name])
                     ->getStateUsing(fn (Product $record) => $record->warehouseStocks->firstWhere('warehouse_id', $warehouse->id)?->qty ?? 0))->all(),
                 Tables\Columns\TextColumn::make('qty')->label('Total')->numeric()->sortable()->alignRight()
+                    ->extraCellAttributes(['data-label' => 'Total'])
                     ->color(fn ($record) => match (true) {
                         $record->qty === 0 => 'danger',
                         $record->qty <= 5  => 'warning',
                         default            => 'success',
                     }),
-                Tables\Columns\TextColumn::make('updated_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('updated_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true)
+                    ->extraCellAttributes(['data-label' => 'Updated']),
             ])
             ->filters([
                 Tables\Filters\Filter::make('has_stock')

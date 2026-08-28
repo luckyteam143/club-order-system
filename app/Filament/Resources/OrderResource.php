@@ -46,11 +46,34 @@ class OrderResource extends Resource
         'forecast_submitted' => 'Forecast Submitted',
     ];
 
+    // Statuses a club user may filter their own orders by on the club panel —
+    // everything except the internal-only "Admin Edit" state.
+    public const CLUB_FILTERABLE_STATUSES = [
+        'draft', 'submitted', 'pending', 'received', 'in_production',
+        'partially_ready', 'partially_picked', 'partially_shipped',
+        'shipped', 'completed', 'cancelled', 'forecast_submitted',
+    ];
+
     // Fulfillment states that only make sense once an order is out of
     // draft — hidden from the status dropdown until then, so a draft can't
     // be jumped straight to e.g. "Shipped".
     public const POST_SUBMIT_ONLY_STATUSES = [
         'received', 'in_production', 'partially_ready', 'partially_picked', 'partially_shipped', 'shipped', 'completed',
+    ];
+
+    // Internal warehouse-picking state — deliberately separate from
+    // `status` above (which already has a club-visible `partially_picked`
+    // value) so picking progress can stay hidden from club users entirely.
+    public const PICKING_STATUSES = [
+        'not_picked'        => 'Not Picked',
+        'partially_picked'  => 'Partially Picked',
+        'picked'            => 'Picked',
+    ];
+
+    public const PICKING_STATUS_COLORS = [
+        'not_picked'       => 'gray',
+        'partially_picked' => 'warning',
+        'picked'           => 'success',
     ];
 
     public const ORDER_KINDS = [
@@ -288,7 +311,12 @@ class OrderResource extends Resource
                     'embellishmentPositions' => self::embellishmentPositionsCatalogForGrid(),
                     'packages'               => self::packagesCatalogForGrid(),
                     'clubItems'              => self::clubItemsCatalogForGrid(),
+                    'clubItemCrests'         => self::clubItemsCrestForGrid(),
                     'canEditPrices'          => auth()->user()?->can('manage_order_pricing') ?? false,
+                    // Crest artwork (has_club_crest / crest_number) is admin-only in the
+                    // grid — a club user still gets the values persisted to order_items
+                    // (prefilled from the club item), they just don't edit them here.
+                    'showCrestControls'      => ! (auth()->user()?->isClub() ?? false),
                 ])
                 ->default(json_encode(['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => []]))
                 ->dehydrateStateUsing(fn ($state) => is_string($state) ? $state : json_encode($state))
@@ -316,6 +344,7 @@ class OrderResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('id')->label('Order #')->sortable(),
                 Tables\Columns\TextColumn::make('club.name')->label('Club')->sortable()->searchable(),
+                Tables\Columns\TextColumn::make('clubTeam.team_name')->label('Team')->sortable()->searchable()->placeholder('—'),
                 Tables\Columns\TextColumn::make('type')
                     ->formatStateUsing(fn (?string $state) => match ($state) {
                         'package'    => 'Package',
@@ -344,13 +373,28 @@ class OrderResource extends Resource
                     ->formatStateUsing(fn (?string $state) => self::STATUSES[$state] ?? $state)
                     ->badge()
                     ->color(fn (?string $state) => self::STATUS_COLORS[$state] ?? 'gray'),
+                // Internal-only — separate from the customer-facing `status`
+                // above, which clubs can also see. Hidden entirely for
+                // anyone without manage_picking (club roles never have it).
+                Tables\Columns\TextColumn::make('picking_status')
+                    ->label('Picking')
+                    ->formatStateUsing(fn (?string $state) => self::PICKING_STATUSES[$state] ?? $state)
+                    ->badge()
+                    ->color(fn (?string $state) => self::PICKING_STATUS_COLORS[$state] ?? 'gray')
+                    ->description(fn (Order $record) => $record->pickingAssignee?->name)
+                    ->visible(fn () => auth()->user()?->can('manage_picking') ?? false)
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('total')->money('CAD')->sortable(),
                 Tables\Columns\TextColumn::make('submitted_at')->dateTime()->sortable()->toggleable(),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
-                    ->options(self::STATUSES),
+                    // Club users get a trimmed list (no internal-only states);
+                    // admin/staff still see every status.
+                    ->options(fn () => auth()->user()?->isClub()
+                        ? array_intersect_key(self::STATUSES, array_flip(self::CLUB_FILTERABLE_STATUSES))
+                        : self::STATUSES),
                 Tables\Filters\SelectFilter::make('type')
                     ->options([
                         'package'    => 'Package',
@@ -360,7 +404,11 @@ class OrderResource extends Resource
                 Tables\Filters\SelectFilter::make('order_kind')
                     ->label('Order Kind')
                     ->options(self::ORDER_KINDS),
-                Tables\Filters\SelectFilter::make('club')->relationship('club', 'name'),
+                // A club user only ever sees their own club's orders, so a
+                // "filter by club" dropdown of every club is pointless here.
+                Tables\Filters\SelectFilter::make('club')
+                    ->relationship('club', 'name')
+                    ->visible(fn () => ! (auth()->user()?->isClub() ?? false)),
             ])
             // Clicking a row opens Edit for anyone allowed to (drafts, or
             // any status for admin/sub-admin) and the read-only View page
@@ -384,6 +432,13 @@ class OrderResource extends Resource
                             'submitted_at' => now(),
                         ]);
                     }),
+                Tables\Actions\Action::make('sendForPicking')
+                    ->label('Send for Picking')
+                    ->icon('heroicon-o-clipboard-document-check')
+                    ->color('warning')
+                    ->visible(fn ($record) => static::canSendForPicking($record))
+                    ->form(fn ($record) => static::sendForPickingFormSchema($record))
+                    ->action(fn ($record, array $data) => static::applySendForPicking($record, $data)),
                 Tables\Actions\Action::make('export')
                     ->label('Export Excel')
                     ->icon('heroicon-o-arrow-down-tray')
@@ -453,9 +508,11 @@ class OrderResource extends Resource
 
             foreach ($source->orderItems as $item) {
                 $newItem = $duplicate->orderItems()->create([
-                    'product_id' => $item->product_id,
-                    'unit_price' => $item->unit_price,
-                    'sort_order' => $item->sort_order,
+                    'product_id'     => $item->product_id,
+                    'unit_price'     => $item->unit_price,
+                    'sort_order'     => $item->sort_order,
+                    'has_club_crest' => $item->has_club_crest,
+                    'crest_number'   => $item->crest_number,
                 ]);
 
                 $itemIdMap[$item->id] = $newItem->id;
@@ -535,6 +592,59 @@ class OrderResource extends Resource
         }
 
         return $user->isClub() && $user->club_id === $record->club_id;
+    }
+
+    /**
+     * Shared by both the "Send for Picking" table row action and its
+     * mirror on the Edit Order page header — same rule everywhere: only
+     * once out of draft/cancelled, and never once already fully picked.
+     */
+    public static function canSendForPicking(Order $record): bool
+    {
+        return (auth()->user()?->can('manage_picking') ?? false)
+            && ! in_array($record->status, ['draft', 'cancelled'], true)
+            && $record->picking_status !== 'picked';
+    }
+
+    /** @return array<\Filament\Forms\Components\Component> */
+    public static function sendForPickingFormSchema(Order $record): array
+    {
+        return [
+            Forms\Components\Select::make('employee_id')
+                ->label('Assign to')
+                ->options(fn () => \App\Models\User::permission('pick_orders')->orderBy('name')->pluck('name', 'id'))
+                ->default($record->picking_assigned_to)
+                ->searchable()
+                ->required(),
+        ];
+    }
+
+    public static function applySendForPicking(Order $record, array $data): void
+    {
+        $previousAssignee = $record->pickingAssignee?->name;
+
+        $record->update([
+            'picking_assigned_to' => $data['employee_id'],
+            'picking_sent_at'     => now(),
+        ]);
+
+        $employeeName = \App\Models\User::find($data['employee_id'])?->name ?? 'employee';
+
+        // Order doesn't use the LogsActivity trait (see OrderActivityLog
+        // widget) — picking's stock writes log against the ProductWarehouseStock
+        // subject, not the order, so without an explicit order-scoped entry
+        // here (and in OrderPicking's save/finish actions) none of it would
+        // ever show up on the order's own "Order Log" widget.
+        activity('order')
+            ->causedBy(auth()->user())
+            ->performedOn($record)
+            ->withChanges([
+                'attributes' => ['picking_assigned_to' => $employeeName],
+                'old'        => ['picking_assigned_to' => $previousAssignee],
+            ])
+            ->log("Sent for picking to {$employeeName}");
+
+        \Filament\Notifications\Notification::make()->title('Order sent for picking')->success()->send();
     }
 
     public static function getRelations(): array
@@ -667,6 +777,27 @@ class OrderResource extends Resource
             ->all();
     }
 
+    /**
+     * club id => {product_id: {has_club_crest, crest_number}} — sourced
+     * from ClubResource's "Assigned Items > Club Crest / Crest #" fields so
+     * a Club Items order's new columns prefill the club's own crest setup.
+     *
+     * @return array<int, array<int, array{has_club_crest: bool, crest_number: int}>>
+     */
+    private static function clubItemsCrestForGrid(): array
+    {
+        $pairs = \Illuminate\Support\Facades\DB::table('club_product')
+            ->select(['club_id', 'product_id', 'has_club_crest', 'crest_number'])
+            ->get();
+
+        return $pairs->groupBy('club_id')
+            ->map(fn ($rows) => $rows->mapWithKeys(fn ($r) => [$r->product_id => [
+                'has_club_crest' => (bool) $r->has_club_crest,
+                'crest_number'   => (int) ($r->crest_number ?? 1),
+            ]])->all())
+            ->all();
+    }
+
     private static function packagesCatalogForGrid(): array
     {
         // Queried directly off package_product (rather than through
@@ -684,6 +815,8 @@ class OrderResource extends Resource
                 ->map(fn (PackageProduct $packageProduct) => [
                     'product_id'     => $packageProduct->product_id,
                     'price'          => (float) ($packageProduct->per_item_price ?? $productPrices->get($packageProduct->product_id) ?? 0),
+                    'has_club_crest' => (bool) $packageProduct->has_club_crest,
+                    'crest_number'   => (int) ($packageProduct->crest_number ?? 1),
                     'sponsors'       => $packageProduct->sponsors->map(fn ($s) => [
                         'sponsor_logo_id'           => $s->sponsor_logo_id,
                         'embellishment_position_id' => $s->embellishment_position_id,

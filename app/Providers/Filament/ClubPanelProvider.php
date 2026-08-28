@@ -48,6 +48,18 @@ class ClubPanelProvider extends PanelProvider
             ->widgets([
                 \App\Filament\Widgets\StatsOverview::class,
             ])
+            // Same "Macron Catalog" sidebar links as the admin panel — each
+            // item is gated by the view_macron_catalogs permission, so club
+            // users only see them once that permission is assigned to their
+            // role.
+            ->navigationItems(\App\Support\CatalogNavigation::items())
+            // Keep "Macron Catalog" at the bottom of the club sidebar too.
+            ->navigationGroups([
+                'Orders',
+                'Administration',
+                'Catalogue',
+                'Macron Catalog',
+            ])
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,

@@ -24,10 +24,16 @@ class ProductResource extends Resource
             Forms\Components\Section::make('Product Info')->schema([
                 Forms\Components\TextInput::make('name')->required()->maxLength(255)->columnSpanFull(),
                 Forms\Components\Textarea::make('description')->rows(3)->columnSpanFull(),
-                Forms\Components\TextInput::make('barcode')->unique(ignoreRecord: true),
+                Forms\Components\TextInput::make('barcode')
+                    ->label('Barcode')
+                    ->unique(ignoreRecord: true)
+                    ->validationMessages(['unique' => 'Another product already uses this barcode.']),
                 Forms\Components\TextInput::make('parent_sku')
                     ->helperText('Leave blank if this is a parent/master product.'),
-                Forms\Components\TextInput::make('default_sku'),
+                Forms\Components\TextInput::make('default_sku')
+                    ->label('Default SKU')
+                    ->unique(ignoreRecord: true)
+                    ->validationMessages(['unique' => 'Another product already uses this Default SKU.']),
                 Forms\Components\TextInput::make('size'),
                 Forms\Components\Select::make('status')
                     ->options(['Active' => 'Active', 'Inactive' => 'Inactive'])
@@ -96,6 +102,12 @@ class ProductResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            // No "all" option: the catalog is ~30k products and the
+            // Attributes column eager-loads a many-to-many relation, so
+            // "all" hydrates 60k+ pivot rows and blows the request memory
+            // limit. Filament also auto-clears a now-invalid "all" value
+            // that was previously saved to a user's session.
+            ->paginated([25, 50, 100])
             ->columns([
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable()->wrap(),
                 Tables\Columns\TextColumn::make('default_sku')->label('Default SKU')->searchable()->toggleable(),
@@ -198,6 +210,22 @@ class ProductResource extends Resource
                     })
                     ->deselectRecordsAfterCompletion()
                     ->successNotificationTitle('Products updated'),
+                Tables\Actions\BulkAction::make('export')
+                    ->label('Export Selected to Excel')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('gray')
+                    ->action(function (\Illuminate\Support\Collection $records) {
+                        // Selected sets are normally small, but keep the same
+                        // ceiling as the full-catalog export in ProductController
+                        // in case someone select-alls the whole list.
+                        ini_set('memory_limit', '1024M');
+
+                        return \Maatwebsite\Excel\Facades\Excel::download(
+                            new \App\Exports\ProductsExport($records->pluck('id')->all()),
+                            'products-selected-' . now()->format('Y-m-d') . '.xlsx',
+                        );
+                    })
+                    ->deselectRecordsAfterCompletion(),
                 Tables\Actions\DeleteBulkAction::make(),
             ])])
             // Otherwise Filament defaults a whole-row click to the first

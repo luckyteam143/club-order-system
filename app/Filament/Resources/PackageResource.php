@@ -100,6 +100,18 @@ class PackageResource extends Resource
                         Forms\Components\TextInput::make('per_item_price')
                             ->label('Price Override')->numeric()->prefix('$')->nullable()
                             ->helperText('Auto-filled from the club\'s price for this item — edit to override.'),
+                        Forms\Components\Toggle::make('has_club_crest')
+                            ->label('Club Crest')
+                            ->helperText('This item carries the club badge.')
+                            ->default(true)
+                            ->live(),
+                        Forms\Components\TextInput::make('crest_number')
+                            ->label('Crest #')
+                            ->helperText('Which crest artwork (1, 2, 3…) — a club may use a different crest on the jersey vs. the shorts.')
+                            ->numeric()
+                            ->default(1)
+                            ->minValue(1)
+                            ->visible(fn (Get $get) => (bool) $get('has_club_crest')),
                     ])
                     ->columns(3)
                     ->columnSpanFull()
@@ -253,6 +265,8 @@ class PackageResource extends Resource
                     'sort_order'     => $packageProduct->sort_order,
                     'qty'            => $packageProduct->qty,
                     'per_item_price' => $packageProduct->per_item_price,
+                    'has_club_crest' => $packageProduct->has_club_crest,
+                    'crest_number'   => $packageProduct->crest_number,
                 ]);
 
                 foreach ($packageProduct->sponsors as $sponsor) {

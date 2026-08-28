@@ -8,6 +8,7 @@ use App\Http\Controllers\ClubTeamController;
 use App\Http\Controllers\LogoStockController;
 use App\Http\Controllers\LogoTypeController;
 use App\Http\Controllers\OrderController;
+use App\Http\Controllers\PackageController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\StockController;
 
@@ -15,8 +16,11 @@ Route::get('/', fn () => redirect('/admin'));
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/orders/{order}/export', [OrderController::class, 'export'])->name('orders.export');
+    Route::get('/orders/{order}/pick-list', [OrderController::class, 'pickList'])->name('orders.pick-list');
     Route::get('/products/export', [ProductController::class, 'export'])->name('products.export');
     Route::get('/clubs/export', [ClubController::class, 'export'])->name('clubs.export');
+    Route::get('/clubs/{club}/items/export', [ClubController::class, 'exportItems'])->name('clubs.items.export');
+    Route::get('/packages/{package}/items/export', [PackageController::class, 'exportItems'])->name('packages.items.export');
     Route::get('/brochures/export', [BrochureController::class, 'export'])->name('brochures.export');
     Route::get('/stock/export', [StockController::class, 'export'])->name('stock.export');
     Route::get('/logo-types/export', [LogoTypeController::class, 'export'])->name('logo-types.export');

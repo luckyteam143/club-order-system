@@ -31,6 +31,13 @@ class ViewOrder extends ViewRecord
                 ->color('gray')
                 ->url(fn () => route('orders.export', $this->record))
                 ->openUrlInNewTab(),
+            Actions\Action::make('printPickList')
+                ->label('Print Pick List')
+                ->icon('heroicon-o-printer')
+                ->color('gray')
+                ->url(fn () => route('orders.pick-list', $this->record))
+                ->openUrlInNewTab()
+                ->visible(fn () => auth()->user()?->can('manage_picking') ?? false),
         ];
     }
 
@@ -77,6 +84,16 @@ class ViewOrder extends ViewRecord
                         TextEntry::make('b2b_number')->label('B2B Number')->placeholder('—'),
                         TextEntry::make('qb_invoice')->label('QB Invoice #')->placeholder('—'),
                         TextEntry::make('brochure_link')->label('Brochure Link')->placeholder('—')->url(fn ($state) => $state),
+                        TextEntry::make('picking_status')
+                            ->label('Picking Status')
+                            ->formatStateUsing(fn (?string $state) => OrderResource::PICKING_STATUSES[$state] ?? $state)
+                            ->badge()
+                            ->color(fn (?string $state) => OrderResource::PICKING_STATUS_COLORS[$state] ?? 'gray')
+                            ->visible(fn () => auth()->user()?->can('manage_picking') ?? false),
+                        TextEntry::make('pickingAssignee.name')
+                            ->label('Picking Assigned To')
+                            ->placeholder('—')
+                            ->visible(fn () => auth()->user()?->can('manage_picking') ?? false),
                     ]),
             ]);
     }

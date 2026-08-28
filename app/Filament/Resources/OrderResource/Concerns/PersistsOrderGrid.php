@@ -31,11 +31,13 @@ trait PersistsOrderGrid
         ]);
 
         $columns = $order->orderItems->map(fn (OrderItem $item) => [
-            'key'         => 'i'.$item->id,
-            'id'          => $item->id,
-            'product_id'  => $item->product_id,
-            'unit_price'  => (float) $item->unit_price,
-            'notes'       => $item->notes,
+            'key'            => 'i'.$item->id,
+            'id'             => $item->id,
+            'product_id'     => $item->product_id,
+            'unit_price'     => (float) $item->unit_price,
+            'notes'          => $item->notes,
+            'has_club_crest' => (bool) $item->has_club_crest,
+            'crest_number'   => (int) ($item->crest_number ?? 1),
         ])->values()->all();
 
         $sponsors = $order->orderItems->flatMap(fn (OrderItem $item) => $item->sponsors->map(fn ($sponsor) => [
@@ -110,11 +112,15 @@ trait PersistsOrderGrid
                     continue;
                 }
 
+                $hasCrest = (bool) ($col['has_club_crest'] ?? true);
+
                 $attrs = [
-                    'order_id'    => $order->id,
-                    'product_id'  => $col['product_id'],
-                    'sort_order'  => $sort,
-                    'notes'       => blank($col['notes'] ?? null) ? null : $col['notes'],
+                    'order_id'       => $order->id,
+                    'product_id'     => $col['product_id'],
+                    'sort_order'     => $sort,
+                    'notes'          => blank($col['notes'] ?? null) ? null : $col['notes'],
+                    'has_club_crest' => $hasCrest,
+                    'crest_number'   => $hasCrest ? max(1, (int) ($col['crest_number'] ?? 1)) : 1,
                 ];
 
                 $id = $col['id'] ?? null;

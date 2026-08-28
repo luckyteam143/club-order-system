@@ -79,16 +79,19 @@ class ListProducts extends ListRecords
                             'text/csv',
                         ])
                         ->required()
-                        ->helperText('Columns: ID (optional, to update), Barcode, Parent SKU, Default SKU, Size, Name, Qty, On Backorder, Backorder Date, Retail Price, Attributes (comma-separated names).'),
+                        ->helperText('Only the columns present in your file are updated — any column you leave out keeps its current value. Include an ID or Barcode column so rows match existing products; a row matching neither creates a new product (Name required for that). Full column set: ID, Barcode, Parent SKU, Default SKU, Size, Name, Status, Macro Category, Product Description, Qty, On Backorder, Backorder Date, Retail Price, Attributes (comma-separated), Main Image, Gallery Links, Year, Available Until Year, Total Look, Weight, Color1/2 Code, Color1/2 Label.'),
                 ])
                 ->action(function (array $data) {
                     $path = Storage::disk('local')->path($data['file']);
 
                     // Large workbooks can take well past the server's default
-                    // 30s / 128M FPM limits to parse + import; raise them just
-                    // for this request rather than touching the shared php.ini.
+                    // time / per-worker memory (256M) to parse + import; raise
+                    // them just for this request rather than touching the
+                    // shared php.ini. A full-catalog sheet (~30k rows) hydrates
+                    // a model per row plus attribute syncing and blew past 512M,
+                    // so this matches the export ceiling with headroom to spare.
                     set_time_limit(600);
-                    ini_set('memory_limit', '512M');
+                    ini_set('memory_limit', '2048M');
 
                     try {
                         $import = new ProductsImport();
@@ -107,15 +110,15 @@ class ListProducts extends ListRecords
 
                     Storage::disk('local')->delete($data['file']);
 
-                    if ($import->failures()->isNotEmpty()) {
+                    if ($import->errors) {
                         Notification::make()
-                            ->title('Import finished with ' . $import->failures()->count() . ' row error(s)')
-                            ->body($import->failures()->map(fn ($f) => 'Row ' . $f->row() . ': ' . implode(' ', $f->errors()))->implode('; '))
+                            ->title($import->imported . ' product(s) imported — ' . count($import->errors) . ' row(s) skipped')
+                            ->body(implode(' ', array_slice($import->errors, 0, 15)))
                             ->warning()
                             ->send();
                     } else {
                         Notification::make()
-                            ->title('Products imported successfully')
+                            ->title($import->imported . ' product(s) imported / updated')
                             ->success()
                             ->send();
                     }

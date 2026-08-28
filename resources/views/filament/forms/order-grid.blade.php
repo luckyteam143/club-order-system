@@ -31,6 +31,7 @@
         embellishmentPositions: @js($embellishmentPositions),
         packages: @js($packages),
         clubItems: @js($clubItems),
+        clubItemCrests: @js($clubItemCrests),
         canEditPrices: @js($canEditPrices),
     })"
     x-init="init()"
@@ -248,6 +249,25 @@
                                 :disabled="!canEditPrices" :title="!canEditPrices ? 'Only an admin can change pricing' : null"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs disabled:cursor-not-allowed disabled:opacity-60">
                         </div>
+                        {{-- Crest artwork selection is an admin/production concern — club
+                             users never see it. The col.has_club_crest / col.crest_number
+                             values are still carried on the column object (prefilled from
+                             the club item, default crest-on / #1) and persisted to
+                             order_items, they're just not editable here for a club user. --}}
+                        @if ($showCrestControls)
+                        <div class="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                            <label class="flex items-center gap-1" title="This item carries the club crest">
+                                <input type="checkbox" x-model="col.has_club_crest" @change="sync()"
+                                    :name="'has_club_crest_' + col.key" :id="'has_club_crest_' + col.key"
+                                    class="rounded border-gray-300 dark:border-gray-600">
+                                <span>Crest</span>
+                            </label>
+                            <input type="number" min="1" step="1" x-show="col.has_club_crest" x-model.number="col.crest_number" @input="sync()"
+                                :name="'crest_number_' + col.key" :id="'crest_number_' + col.key"
+                                title="Which crest artwork (1, 2, 3…)"
+                                class="fi-input w-12 rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs">
+                        </div>
+                        @endif
                     </div>
                 </template>
 
@@ -563,6 +583,7 @@ function orderGrid(config) {
         embellishmentPositions: config.embellishmentPositions,
         packages: config.packages,
         clubItems: config.clubItems,
+        clubItemCrests: config.clubItemCrests,
         canEditPrices: config.canEditPrices,
         columns: [],
         rows: [],
@@ -746,16 +767,21 @@ function orderGrid(config) {
             return this.rows[0];
         },
 
+        // Pure read — no state mutation. Alpine still evaluates the bulk
+        // table's x-for bindings while it's x-show="false" (i.e. on a
+        // standard, non-bulk order), and in that state the cell is in
+        // {size, qty} shape with no `.sizes`, so guard every hop rather
+        // than assume the bulk shape.
         bulkQty(col, size) {
-            const row = this.ensureBulkRow();
-            this.ensureCell(row, col.key);
+            const cell = this.rows[0]?.cells[col.key];
 
-            return row.cells[col.key].sizes[size] || 0;
+            return (cell && cell.sizes && cell.sizes[size]) || 0;
         },
 
         setBulkQty(col, size, value) {
             const row = this.ensureBulkRow();
             this.ensureCell(row, col.key);
+            if (!row.cells[col.key].sizes) row.cells[col.key].sizes = {};
 
             const qty = Math.max(0, parseInt(value) || 0);
             if (qty > 0) {
@@ -914,10 +940,21 @@ function orderGrid(config) {
         },
 
         addColumn() {
-            const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0, notes: '' };
+            const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0, notes: '', has_club_crest: true, crest_number: 1 };
             this.columns.push(col);
             this.ensureAllCells();
             this.sync();
+        },
+
+        // The club's own crest setup for a product (ClubResource > Assigned
+        // Items) — used to prefill a Club Items order column when its
+        // product is picked. Returns null for other order types / unknown
+        // products so the column keeps its default (crest on, #1).
+        clubCrestFor(productId) {
+            if (!this.isClubItemsType() || !productId) return null;
+            const clubId = this.$wire.data.club_id;
+            const forClub = clubId ? this.clubItemCrests[clubId] : null;
+            return (forClub && forClub[productId]) ? forClub[productId] : null;
         },
 
         removeColumn(colKey) {
@@ -939,6 +976,13 @@ function orderGrid(config) {
 
         onProductChange(col) {
             col.unit_price = col.product_id ? this.priceForProduct(col.product_id) : 0;
+
+            const crest = this.clubCrestFor(col.product_id);
+            if (crest) {
+                col.has_club_crest = crest.has_club_crest;
+                col.crest_number = crest.crest_number;
+            }
+
             this.rows.forEach(row => {
                 row.cells[col.key] = this.isBulkType() ? { sizes: {} } : { size: '', qty: 1, invalid: false };
             });
@@ -1038,6 +1082,8 @@ function orderGrid(config) {
                 product_id: item.product_id,
                 unit_price: item.price,
                 notes: '',
+                has_club_crest: item.has_club_crest ?? true,
+                crest_number: item.crest_number ?? 1,
             }));
 
             this.rows.forEach(row => {
@@ -1376,6 +1422,8 @@ function orderGrid(config) {
                 const columns = (data.columns || []).map(c => ({
                     product_id: c.product_id,
                     unit_price: c.unit_price,
+                    has_club_crest: c.has_club_crest,
+                    crest_number: c.crest_number,
                 }));
 
                 const rows = (data.rows || []).map(r => {

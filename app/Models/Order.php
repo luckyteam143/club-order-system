@@ -10,6 +10,7 @@ class Order extends Model
         'club_id', 'club_team_id', 'package_id', 'created_by', 'type', 'order_kind', 'status', 'is_copy', 'total', 'notes', 'submitted_at',
         'team_po', 'coach_manager', 'shipping_address', 'phone', 'email',
         'order_date', 'b2b_number', 'qb_invoice', 'brochure_link', 'last_changed_cells', 'forecast_season',
+        'picking_status', 'picking_assigned_to', 'picking_sent_at', 'picking_completed_at',
     ];
 
     protected $casts = [
@@ -18,6 +19,8 @@ class Order extends Model
         'submitted_at' => 'datetime',
         'order_date' => 'date',
         'last_changed_cells' => 'array',
+        'picking_sent_at' => 'datetime',
+        'picking_completed_at' => 'datetime',
     ];
 
     public function club(): \Illuminate\Database\Eloquent\Relations\BelongsTo
@@ -53,6 +56,40 @@ class Order extends Model
     public function orderNotes(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(OrderNote::class)->orderBy('created_at');
+    }
+
+    public function pickingAssignee(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(User::class, 'picking_assigned_to');
+    }
+
+    /**
+     * Recomputes the order-level `picking_status` from every (item, size)
+     * combination's own picked qty vs its ordered qty — picking is tracked
+     * per size (sizes are separate barcoded/stocked catalog products), not
+     * per item. A combo only counts toward "picked" once its full ordered
+     * qty has been picked, so a single partially-picked size is enough to
+     * make the whole order `partially_picked` even if every other size is
+     * fully picked.
+     */
+    public function recalculatePickingStatus(): void
+    {
+        $this->loadMissing('orderItems.cells', 'orderItems.picks');
+
+        $sizeCombos = $this->orderItems->flatMap(fn (OrderItem $item) => $item->sizeBreakdown()->keys()
+            ->map(fn (string $size) => [$item, $size]));
+
+        $allFull = $sizeCombos->isNotEmpty() && $sizeCombos->every(
+            fn (array $combo) => $combo[0]->pickStateForSize($combo[1]) === 'full'
+        );
+
+        $anyPicked = $sizeCombos->contains(
+            fn (array $combo) => $combo[0]->pickedQtyForSize($combo[1]) > 0
+        );
+
+        $this->update([
+            'picking_status' => $allFull ? 'picked' : ($anyPicked ? 'partially_picked' : 'not_picked'),
+        ]);
     }
 
     /**

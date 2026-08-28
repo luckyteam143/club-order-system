@@ -2,10 +2,31 @@
     {{ $this->infolist }}
 
     @php
-        $record->loadMissing(['orderItems.product', 'orderItems.sponsors.sponsorLogo', 'orderItems.embellishments.embellishment', 'playerRows.itemCells']);
+        $record->loadMissing(['orderItems.product', 'orderItems.cells', 'orderItems.picks', 'orderItems.sponsors.sponsorLogo', 'orderItems.embellishments.embellishment', 'playerRows.itemCells']);
         $items = $record->orderItems;
         $rows = $record->playerRows;
         $isBulk = in_array($record->order_kind, ['bulk', 'forecast'], true);
+
+        // Internal-only pick-status highlighting — never shown to club
+        // users (manage_picking is a staff-only permission). Picking is
+        // tracked per (item, size) — sizes are separate barcoded/stocked
+        // catalog products — so each size's own cells get their own color,
+        // not a single color blanket-applied across a whole item. A
+        // partially-picked size shows a hard-edge green/red split
+        // proportional to picked vs balance (e.g. 3 of 5 picked → 60%
+        // green, 40% red) rather than one flat "partial" color, so the
+        // exact picked/remaining ratio is visible at a glance; fully
+        // picked is solid green, untouched is solid red. Inline hex
+        // colors via a CSS gradient, not Tailwind utility classes — this
+        // app has no Tailwind build for custom page/view classes beyond
+        // what Filament's own compiled CSS ships.
+        $canSeePicking = auth()->user()?->can('manage_picking') ?? false;
+        $pickStyle = function ($item, $size) {
+            $ordered = $item->orderedQtyForSize($size);
+            $pct = $ordered > 0 ? min(100, round($item->pickedQtyForSize($size) / $ordered * 100)) : 0;
+
+            return "background-image: linear-gradient(to right, #4ade80 {$pct}%, #fca5a5 {$pct}%); padding:1px 5px; border-radius:3px;";
+        };
     @endphp
 
     @if ($isBulk)
@@ -54,7 +75,10 @@
                                         @else
                                             <div class="flex flex-wrap gap-x-3 gap-y-1">
                                                 @foreach ($itemCells->sort(fn ($a, $b) => [$sizeOrder[$a->size] ?? PHP_INT_MAX, $a->size] <=> [$sizeOrder[$b->size] ?? PHP_INT_MAX, $b->size]) as $cell)
-                                                    <span><span class="font-medium">{{ $cell->size }}:</span> {{ $cell->qty }}</span>
+                                                    <span>
+                                                        <span class="font-medium">{{ $cell->size }}:</span>
+                                                        <span @if ($canSeePicking) style="{{ $pickStyle($item, $cell->size) }}" @endif>{{ $cell->qty }}</span>
+                                                    </span>
                                                 @endforeach
                                             </div>
                                         @endif
@@ -103,7 +127,13 @@
                                     <td class="p-2">{{ $row->initials }}</td>
                                     @foreach ($items as $item)
                                         @php $cell = $row->itemCells->firstWhere('order_item_id', $item->id); @endphp
-                                        <td class="p-2">{{ $cell?->size ? "{$cell->size} (x{$cell->qty})" : '—' }}</td>
+                                        <td class="p-2">
+                                            @if ($cell?->size)
+                                                {{ $cell->size }} (x<span @if ($canSeePicking) style="{{ $pickStyle($item, $cell->size) }}" @endif>{{ $cell->qty }}</span>)
+                                            @else
+                                                —
+                                            @endif
+                                        </td>
                                     @endforeach
                                     <td class="p-2">{{ $row->notes ?: '—' }}</td>
                                 </tr>

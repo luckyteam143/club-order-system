@@ -18,6 +18,16 @@ class ProductsExport implements FromCollection, WithHeadings, WithMapping, WithS
     /** @var Collection<int, Collection> product_id => attribute name rows, smallest-to-largest by position */
     private Collection $attributeNamesByProductId;
 
+    /**
+     * @param  array<int>|null  $productIds  When given, only these products are
+     *                                       exported (the "export selected rows"
+     *                                       bulk action). Null exports the whole
+     *                                       catalog.
+     */
+    public function __construct(private ?array $productIds = null)
+    {
+    }
+
     public function title(): string
     {
         return 'Products';
@@ -46,12 +56,16 @@ class ProductsExport implements FromCollection, WithHeadings, WithMapping, WithS
         $this->attributeNamesByProductId = DB::table('attribute_product')
             ->join('attributes', 'attributes.id', '=', 'attribute_product.attribute_id')
             ->select(['attribute_product.product_id', 'attributes.name'])
+            ->when($this->productIds !== null, fn ($query) => $query->whereIn('attribute_product.product_id', $this->productIds))
             ->orderBy('attributes.position')
             ->orderBy('attributes.name')
             ->get()
             ->groupBy('product_id');
 
-        return Product::query()->orderBy('name')->get();
+        return Product::query()
+            ->when($this->productIds !== null, fn ($query) => $query->whereIn('id', $this->productIds))
+            ->orderBy('name')
+            ->get();
     }
 
     public function map($product): array

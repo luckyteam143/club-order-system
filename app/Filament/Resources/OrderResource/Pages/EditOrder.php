@@ -66,6 +66,13 @@ class EditOrder extends EditRecord
                 ->color('gray')
                 ->url(fn () => route('orders.export', $this->record))
                 ->openUrlInNewTab(),
+            Actions\Action::make('printPickList')
+                ->label('Print Pick List')
+                ->icon('heroicon-o-printer')
+                ->color('gray')
+                ->url(fn () => route('orders.pick-list', $this->record))
+                ->openUrlInNewTab()
+                ->visible(fn () => auth()->user()?->can('manage_picking') ?? false),
             Actions\Action::make('submitOrder')
                 ->label($submitLabel)
                 ->icon('heroicon-o-paper-airplane')
@@ -87,6 +94,13 @@ class EditOrder extends EditRecord
 
                     $this->redirect(static::getResource()::getUrl('index'));
                 }),
+            Actions\Action::make('sendForPicking')
+                ->label('Send for Picking')
+                ->icon('heroicon-o-clipboard-document-check')
+                ->color('warning')
+                ->visible(fn () => OrderResource::canSendForPicking($this->record))
+                ->form(fn () => OrderResource::sendForPickingFormSchema($this->record))
+                ->action(fn (array $data) => OrderResource::applySendForPicking($this->record, $data)),
         ];
 
         // A Bulk Order draft additionally gets a Submit <Season> Forecast

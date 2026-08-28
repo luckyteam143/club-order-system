@@ -36,6 +36,7 @@ class ActivityLogResource extends Resource
         'logo_type'              => 'Logo Type',
         'brochure'               => 'Brochure',
         'club_team'              => 'Club Team',
+        'macron_catalog'         => 'Macron Catalog',
     ];
 
     public static function table(Table $table): Table

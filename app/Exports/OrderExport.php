@@ -67,6 +67,7 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         $this->order->loadMissing([
             'club', 'package',
             'orderItems.product.attributes',
+            'orderItems.cells',
             'orderItems.sponsors.sponsorLogo', 'orderItems.sponsors.position',
             'orderItems.embellishments.embellishment', 'orderItems.embellishments.position',
             'playerRows.itemCells',
@@ -175,7 +176,23 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         $row++;
 
         // ── Sponsor Logos & Embellishments ───────────────────────────
-        $this->buildSponsors($sheet, $row, $items);
+        $row = $this->buildSponsors($sheet, $row, $items);
+        $row++;
+
+        // Logos to physically produce = one per garment of the item that
+        // carries them, i.e. the item's ordered qty across the roster.
+        $qtyByItem = $items->mapWithKeys(fn (OrderItem $item) => [$item->id => (int) $item->cells->sum('qty')]);
+
+        // ── Club Crest Logos Required ────────────────────────────────
+        $row = $this->buildCrestSummary($sheet, $row, $items, $qtyByItem);
+        $row++;
+
+        // ── Sponsor Logos Required ───────────────────────────────────
+        $row = $this->buildSponsorSummary($sheet, $row, $items, $qtyByItem);
+        $row++;
+
+        // ── Player Number Digit Count ────────────────────────────────
+        $this->buildDigitCount($sheet, $row);
     }
 
     /**
@@ -309,10 +326,17 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         $row++;
 
         // When the roster grid actually has size cells to point at, drive
-        // every count with COUNTIF/SUM formulas instead of baked-in numbers,
-        // so fixing a mis-picked size in the roster updates these totals
-        // automatically instead of leaving them stale.
+        // every per-item-per-size count with a COUNTIF formula instead of a
+        // baked-in number, so fixing a mis-picked size in the roster
+        // updates these totals automatically instead of leaving them
+        // stale. Bulk/forecast orders have no such roster to COUNTIF
+        // against, so their per-cell counts stay static — but the row and
+        // column Totals are SUM()s of this summary table's own cells
+        // either way, so those stay formula-based unconditionally: SUM
+        // doesn't care whether the cells it's adding are themselves
+        // formulas or plain numbers.
         $useFormulas = $roster['formulasUsable'] && $sizes->isNotEmpty();
+        $useTotalFormulas = $sizes->isNotEmpty();
         $firstSizeCol = $this->colLetter(2);
         $lastSizeCol = $this->colLetter(1 + $sizes->count());
 
@@ -348,11 +372,12 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
                 $col++;
             }
 
-            if ($useFormulas) {
+            $grandTotal += $itemTotal;
+
+            if ($useTotalFormulas) {
                 $sheet->setCellValue("{$totalCol}{$row}", "=SUM({$firstSizeCol}{$row}:{$lastSizeCol}{$row})");
             } else {
                 $sheet->setCellValue("{$totalCol}{$row}", $itemTotal);
-                $grandTotal += $itemTotal;
             }
             $this->bordered($sheet, "{$totalCol}{$row}", Alignment::HORIZONTAL_CENTER);
             $row++;
@@ -365,7 +390,7 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         $col = 2;
         foreach ($sizes as $size) {
             $cell = $this->colLetter($col)."{$row}";
-            if ($useFormulas) {
+            if ($useTotalFormulas) {
                 $letter = $this->colLetter($col);
                 $sheet->setCellValue($cell, "=SUM({$letter}{$firstItemRow}:{$letter}{$lastItemRow})");
             } else {
@@ -374,7 +399,7 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
             $this->bordered($sheet, $cell, Alignment::HORIZONTAL_CENTER);
             $col++;
         }
-        if ($useFormulas) {
+        if ($useTotalFormulas) {
             $sheet->setCellValue("{$totalCol}{$row}", "=SUM({$totalCol}{$firstItemRow}:{$totalCol}{$lastItemRow})");
         } else {
             $sheet->setCellValue("{$totalCol}{$row}", $grandTotal);
@@ -386,8 +411,9 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
 
     /**
      * @param  Collection<int, OrderItem>  $items
+     * @return int  the next free row
      */
-    private function buildSponsors(Worksheet $sheet, int $row, Collection $items): void
+    private function buildSponsors(Worksheet $sheet, int $row, Collection $items): int
     {
         $sheet->setCellValue("A{$row}", 'SPONSOR LOGOS & EMBELLISHMENTS');
         $this->plainTitle($sheet, "A{$row}");
@@ -420,7 +446,180 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
 
         if (! $hasAny) {
             $sheet->setCellValue("A{$row}", 'None on this order.');
+            $row++;
         }
+
+        return $row;
+    }
+
+    /**
+     * How many club-crest logos to produce, grouped by crest number — the
+     * club may use a different crest artwork on the jersey vs. the shorts.
+     * One logo per garment of each crest-carrying item (its roster qty).
+     *
+     * @param  Collection<int, OrderItem>  $items
+     * @param  Collection<int, int>  $qtyByItem  order item id => ordered qty
+     */
+    private function buildCrestSummary(Worksheet $sheet, int $row, Collection $items, Collection $qtyByItem): int
+    {
+        $sheet->setCellValue("A{$row}", 'CLUB CREST LOGOS REQUIRED');
+        $this->plainTitle($sheet, "A{$row}");
+        $row++;
+
+        $headerRow = $row;
+        $sheet->setCellValue("A{$headerRow}", 'Crest #');
+        $sheet->setCellValue("B{$headerRow}", 'Qty');
+        $this->fillRange($sheet, "A{$headerRow}:B{$headerRow}", self::BLACK, self::WHITE, bold: false);
+        $row++;
+
+        $tally = [];
+        foreach ($items as $item) {
+            if (! $item->has_club_crest) {
+                continue;
+            }
+            $number = (int) ($item->crest_number ?: 1);
+            $tally[$number] = ($tally[$number] ?? 0) + (int) ($qtyByItem[$item->id] ?? 0);
+        }
+
+        if ($tally === []) {
+            $sheet->setCellValue("A{$row}", 'No club crests on this order.');
+
+            return $row + 1;
+        }
+
+        ksort($tally);
+        $total = 0;
+
+        foreach ($tally as $number => $qty) {
+            $sheet->setCellValue("A{$row}", 'Crest '.$number);
+            $sheet->setCellValue("B{$row}", $qty);
+            $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_LEFT);
+            $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_CENTER);
+            $total += $qty;
+            $row++;
+        }
+
+        $sheet->setCellValue("A{$row}", 'Total');
+        $sheet->setCellValue("B{$row}", $total);
+        $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_CENTER, bold: true);
+        $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_CENTER, bold: true);
+
+        return $row + 1;
+    }
+
+    /**
+     * How many of each sponsor logo to produce — one per garment of every
+     * item carrying it (its roster qty), summed across items / positions.
+     *
+     * @param  Collection<int, OrderItem>  $items
+     * @param  Collection<int, int>  $qtyByItem  order item id => ordered qty
+     */
+    private function buildSponsorSummary(Worksheet $sheet, int $row, Collection $items, Collection $qtyByItem): int
+    {
+        $sheet->setCellValue("A{$row}", 'SPONSOR LOGOS REQUIRED');
+        $this->plainTitle($sheet, "A{$row}");
+        $row++;
+
+        $headerRow = $row;
+        foreach (['A' => 'Sponsor Logo', 'B' => 'Position', 'C' => 'Qty'] as $col => $label) {
+            $sheet->setCellValue("{$col}{$headerRow}", $label);
+        }
+        $this->fillRange($sheet, "A{$headerRow}:C{$headerRow}", self::BLACK, self::WHITE, bold: false);
+        $row++;
+
+        $tally = [];
+        foreach ($items as $item) {
+            $qty = (int) ($qtyByItem[$item->id] ?? 0);
+
+            foreach ($item->sponsors as $sponsor) {
+                $name = $sponsor->sponsorLogo?->name ?? '—';
+                $position = $sponsor->position?->name ?? '—';
+                $key = $name.'|'.$position;
+                $tally[$key] ??= ['name' => $name, 'position' => $position, 'qty' => 0];
+                $tally[$key]['qty'] += $qty;
+            }
+        }
+
+        if ($tally === []) {
+            $sheet->setCellValue("A{$row}", 'No sponsor logos on this order.');
+
+            return $row + 1;
+        }
+
+        $total = 0;
+
+        foreach ($tally as $entry) {
+            $sheet->setCellValue("A{$row}", $entry['name']);
+            $sheet->setCellValue("B{$row}", $entry['position']);
+            $sheet->setCellValue("C{$row}", $entry['qty']);
+            $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_LEFT);
+            $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_LEFT);
+            $this->bordered($sheet, "C{$row}", Alignment::HORIZONTAL_CENTER);
+            $total += $entry['qty'];
+            $row++;
+        }
+
+        $sheet->setCellValue("A{$row}", 'Total');
+        $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_CENTER, bold: true);
+        $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_LEFT);
+        $sheet->setCellValue("C{$row}", $total);
+        $this->bordered($sheet, "C{$row}", Alignment::HORIZONTAL_CENTER, bold: true);
+
+        return $row + 1;
+    }
+
+    /**
+     * Frequency of each digit 0–9 across all roster player numbers — heat
+     * press number kits are bought per digit. Only digits that occur are
+     * listed. Bulk/forecast orders have no player numbers.
+     */
+    private function buildDigitCount(Worksheet $sheet, int $row): void
+    {
+        $sheet->setCellValue("A{$row}", 'PLAYER NUMBER DIGIT COUNT');
+        $this->plainTitle($sheet, "A{$row}");
+        $row++;
+
+        $headerRow = $row;
+        $sheet->setCellValue("A{$headerRow}", 'Digit');
+        $sheet->setCellValue("B{$headerRow}", 'Qty');
+        $this->fillRange($sheet, "A{$headerRow}:B{$headerRow}", self::BLACK, self::WHITE, bold: false);
+        $row++;
+
+        $digits = array_fill(0, 10, 0);
+
+        foreach ($this->order->playerRows as $player) {
+            foreach (str_split((string) $player->number) as $char) {
+                if ($char !== '' && ctype_digit($char)) {
+                    $digits[(int) $char]++;
+                }
+            }
+        }
+
+        if (array_sum($digits) === 0) {
+            $sheet->setCellValue("A{$row}", 'No player numbers on this order.');
+
+            return;
+        }
+
+        $total = 0;
+
+        for ($d = 0; $d <= 9; $d++) {
+            if ($digits[$d] === 0) {
+                continue;
+            }
+
+            $sheet->setCellValue("A{$row}", (string) $d);
+            $sheet->setCellValue("B{$row}", $digits[$d]);
+            $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_CENTER);
+            $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_CENTER);
+            $total += $digits[$d];
+            $row++;
+        }
+
+        $sheet->setCellValue("A{$row}", 'Total');
+        $sheet->setCellValue("B{$row}", $total);
+        $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_CENTER, bold: true);
+        $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_CENTER, bold: true);
     }
 
     private function sponsorRow(Worksheet $sheet, int $row, string $item, string $type, string $name, string $position, float $price): void

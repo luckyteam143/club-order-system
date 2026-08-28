@@ -40,6 +40,18 @@ class AdminPanelProvider extends PanelProvider
                 Widgets\AccountWidget::class,
                 \App\Filament\Widgets\StatsOverview::class,
             ])
+            // Dynamic "Macron Catalog" sidebar links, managed from the
+            // Macron Catalogs resource and gated by view_macron_catalogs.
+            ->navigationItems(\App\Support\CatalogNavigation::items())
+            // Explicit group order so "Macron Catalog" sits at the bottom
+            // rather than wherever discovery order happens to put it.
+            ->navigationGroups([
+                'Inventory',
+                'Administration',
+                'Orders',
+                'Catalogue',
+                'Macron Catalog',
+            ])
             ->middleware([
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,

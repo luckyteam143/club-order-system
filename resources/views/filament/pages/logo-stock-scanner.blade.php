@@ -123,6 +123,7 @@
                 <input
                     type="text" x-ref="barcodeInput" x-model="barcodeValue"
                     @keydown.enter.prevent="onScan()"
+                    @input="scheduleAutoScan()"
                     @focus="scrollIntoView($event.target)"
                     @blur="refocusSoon()"
                     autocomplete="off" autocapitalize="off" spellcheck="false"
@@ -260,6 +261,7 @@
                 bannerTimer: null,
                 recentScans: [],
                 lastScan: { barcode: null, time: 0 },
+                autoScanTimer: null,
 
                 init() {
                     if (this.confirmed) {
@@ -324,7 +326,24 @@
                     this.bannerTimer = setTimeout(() => { this.banner = ''; }, 2500);
                 },
 
+                // Fallback for scanners (several Zebra DataWedge "Keystroke
+                // output" profiles by default) that inject the barcode's
+                // characters but never send a trailing Enter/terminator —
+                // see the identical comment in the Product Stock Scanner's
+                // script for the full explanation.
+                scheduleAutoScan() {
+                    clearTimeout(this.autoScanTimer);
+
+                    if (!this.barcodeValue.trim()) return;
+
+                    this.autoScanTimer = setTimeout(() => {
+                        if (this.barcodeValue.trim()) this.onScan();
+                    }, 200);
+                },
+
                 onScan() {
+                    clearTimeout(this.autoScanTimer);
+
                     const barcode = this.barcodeValue.trim();
                     this.barcodeValue = '';
 

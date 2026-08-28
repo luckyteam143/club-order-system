@@ -15,7 +15,9 @@ return new class extends Migration
             $table->id();
             $table->string('barcode')->nullable()->unique();
             $table->string('parent_sku')->nullable();
-            $table->string('default_sku')->nullable();
+            // Unique for fresh installs; existing databases get this index
+            // from 2026_08_27_130000_add_unique_index_to_products_default_sku.
+            $table->string('default_sku')->nullable()->unique();
             $table->string('size')->nullable();
             $table->string('name');
             $table->unsignedInteger('qty')->default(0);

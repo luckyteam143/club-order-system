@@ -42,6 +42,8 @@ trait PersistsPackageItems
                 'product_id'     => $packageProduct->product_id,
                 'qty'            => $packageProduct->qty,
                 'per_item_price' => $packageProduct->per_item_price,
+                'has_club_crest' => (bool) $packageProduct->has_club_crest,
+                'crest_number'   => (int) ($packageProduct->crest_number ?? 1),
             ])
             ->values()
             ->all();
@@ -95,6 +97,8 @@ trait PersistsPackageItems
                     continue;
                 }
 
+                $hasCrest = (bool) ($item['has_club_crest'] ?? true);
+
                 $attrs = [
                     'package_id'     => $package->id,
                     'product_id'     => (int) $productId,
@@ -104,6 +108,8 @@ trait PersistsPackageItems
                     'sort_order'     => $index,
                     'qty'            => max(1, (int) ($item['qty'] ?? 1)),
                     'per_item_price' => filled($item['per_item_price'] ?? null) ? (float) $item['per_item_price'] : null,
+                    'has_club_crest' => $hasCrest,
+                    'crest_number'   => $hasCrest ? max(1, (int) ($item['crest_number'] ?? 1)) : 1,
                 ];
 
                 // Matched by row id (not product_id) so the same product can

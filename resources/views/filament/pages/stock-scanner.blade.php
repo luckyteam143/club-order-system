@@ -153,6 +153,7 @@
                 <input
                     type="text" x-ref="barcodeInput" x-model="barcodeValue"
                     @keydown.enter.prevent="onScan()"
+                    @input="scheduleAutoScan()"
                     @focus="scrollIntoView($event.target)"
                     @blur="refocusSoon()"
                     autocomplete="off" autocapitalize="off" spellcheck="false"
@@ -266,6 +267,7 @@
                 bannerTimer: null,
                 recentScans: [],
                 lastScan: { barcode: null, time: 0 },
+                autoScanTimer: null,
 
                 init() {
                     if (this.confirmed) {
@@ -339,7 +341,30 @@
                     this.bannerTimer = setTimeout(() => { this.banner = ''; }, 2000);
                 },
 
+                // Some scanners (several Zebra DataWedge "Keystroke output"
+                // profiles by default) inject the barcode's characters but
+                // never send a trailing Enter/terminator key — the
+                // @keydown.enter listener above then never fires and the
+                // code just sits in the field. This is the fallback: if no
+                // more keystrokes arrive for 200ms after the field last
+                // changed (well past scanner keystroke speed, well short of
+                // a human still typing), auto-fire the scan. Enter still
+                // wins the race for scanners that do send it — this timer
+                // is cleared/redundant in that case since onScan() has
+                // already emptied the field by the time it would fire.
+                scheduleAutoScan() {
+                    clearTimeout(this.autoScanTimer);
+
+                    if (!this.barcodeValue.trim()) return;
+
+                    this.autoScanTimer = setTimeout(() => {
+                        if (this.barcodeValue.trim()) this.onScan();
+                    }, 200);
+                },
+
                 onScan() {
+                    clearTimeout(this.autoScanTimer);
+
                     const barcode = this.barcodeValue.trim();
                     this.barcodeValue = '';
 

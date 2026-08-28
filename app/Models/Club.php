@@ -32,7 +32,7 @@ class Club extends Model
 
     public function products(): BelongsToMany
     {
-        return $this->belongsToMany(Product::class)->withPivot(['club_price', 'online_store_price'])->withTimestamps();
+        return $this->belongsToMany(Product::class)->withPivot(['id', 'club_price', 'online_store_price', 'has_club_crest', 'crest_number'])->withTimestamps();
     }
 
     public function orders(): HasMany
