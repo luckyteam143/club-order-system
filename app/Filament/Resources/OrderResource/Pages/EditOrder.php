@@ -60,6 +60,21 @@ class EditOrder extends EditRecord
         };
 
         $actions = [
+            // No ->keyBindings(['mod+s']) here: Ctrl/Cmd+S is handled inside
+            // the order grid (resources/views/filament/forms/order-grid.blade.php),
+            // which needs to commit the focused roster cell before saving and
+            // to reliably beat the browser's own "Save page" dialog. A key
+            // binding here as well would just double-fire the save.
+            Actions\Action::make('saveTop')
+                ->label(fn () => $this->record->status === 'draft' ? 'Save Draft' : 'Save Changes')
+                ->icon('heroicon-o-check')
+                ->color('primary')
+                ->action(fn () => $this->save()),
+            Actions\Action::make('cancelTop')
+                ->label('Cancel')
+                ->icon('heroicon-o-x-mark')
+                ->color('gray')
+                ->url(fn () => $this->previousUrl ?? static::getResource()::getUrl('index')),
             Actions\Action::make('export')
                 ->label('Export Excel')
                 ->icon('heroicon-o-arrow-down-tray')
@@ -157,6 +172,16 @@ class EditOrder extends EditRecord
     {
         return parent::getSaveFormAction()
             ->label(fn () => $this->record->status === 'draft' ? 'Save Draft' : 'Save Changes');
+    }
+
+    /**
+     * Save / Cancel live in the page header (see getHeaderActions()) so
+     * they're reachable without scrolling past the full order sheet — the
+     * default footer form actions are dropped.
+     */
+    protected function getFormActions(): array
+    {
+        return [];
     }
 
     protected function mutateFormDataBeforeFill(array $data): array

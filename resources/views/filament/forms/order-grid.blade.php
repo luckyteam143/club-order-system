@@ -381,6 +381,16 @@
         </div>
     </div>
 
+    <div class="mt-4 flex flex-wrap items-center gap-2">
+        <button type="button" @click="saveDraft()"
+            class="fi-btn inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-500">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+            Save Draft
+        </button>
+    </div>
+
     <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700" x-show="columns.length && !isBulkType()">
         <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Item / Size Summary</h4>
         <div class="overflow-x-auto">
@@ -682,6 +692,24 @@ function orderGrid(config) {
                 event.preventDefault();
                 event.returnValue = '';
             });
+
+            // Ctrl/Cmd+S = Save Draft, handled entirely here rather than
+            // relying on Filament's ->keyBindings(['mod+s']) on the header
+            // button: that binding lives outside this wire:ignore'd grid and
+            // proved unreliable from inside it (the browser's own "Save
+            // page" dialog kept winning). Capture phase on window runs
+            // before everything else, so preventDefault() reliably kills the
+            // browser dialog and stopPropagation() keeps any header-button
+            // key binding from also firing (no double save). saveDraft()
+            // then commits the focused cell and calls the page's save.
+            window.addEventListener('keydown', (event) => {
+                const isSaveCombo = (event.ctrlKey || event.metaKey) && (event.key === 's' || event.key === 'S');
+                if (!isSaveCombo) return;
+
+                event.preventDefault();
+                event.stopPropagation();
+                this.saveDraft();
+            }, true);
 
             // Submit Order (behind its own confirmation modal) follows up a
             // successful save with a hard window.location redirect — which
@@ -1562,6 +1590,41 @@ function orderGrid(config) {
         onFormSaved() {
             this.discardLocalDraft();
             this.initialFormSnapshot = this.currentFormSnapshot();
+        },
+
+        // Size and product cells only push their value to $wire on
+        // blur/change, so blur whatever's focused inside the grid before a
+        // save so the in-progress cell isn't left out of the request.
+        commitActiveCell() {
+            const active = document.activeElement;
+            if (active && active !== document.body && this.$root.contains(active) && typeof active.blur === 'function') {
+                active.blur();
+            }
+        },
+
+        // Shared by the in-grid "Save Draft" button (above the Item / Size
+        // Summary) and the Ctrl/Cmd+S shortcut. Calls the Filament page's
+        // own save method directly — save() on the Edit page, create() on
+        // the Create / Create Bulk pages (both end their path with /create
+        // or /create-bulk, Edit ends with /edit) — which is exactly what the
+        // header "Save Draft" button does, so notifications and redirect
+        // behaviour stay identical. commitActiveCell() first so a size /
+        // product cell being edited (those only push to $wire on blur) is
+        // included in the request.
+        saving: false,
+        saveDraft() {
+            if (this.saving) return;
+            this.saving = true;
+
+            this.commitActiveCell();
+
+            this.$nextTick(() => {
+                const method = window.location.pathname.endsWith('/edit') ? 'save' : 'create';
+
+                Promise.resolve(this.$wire[method]()).finally(() => {
+                    this.saving = false;
+                });
+            });
         },
     };
 }
