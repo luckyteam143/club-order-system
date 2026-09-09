@@ -23,9 +23,9 @@ class BulkStock extends Page
     // Alpine-managed JSON blob synced via $wire.$set(), same mechanism as
     // the Order page's grid, just without the Form wrapper since this page
     // isn't editing a single record. Shape: { [productId]: { cells: {
-    // [warehouseId]: { qty, id } } } } — keyed by product id (not a plain
-    // array) so edits survive the visible list changing as the search
-    // term changes.
+    // [warehouseId]: { qty, on_hold, id } } } } — keyed by product id (not
+    // a plain array) so edits survive the visible list changing as the
+    // search term changes.
     public string $gridState = '{}';
 
     public array $warehousesForGrid = [];
@@ -113,17 +113,18 @@ class BulkStock extends Page
      * the search has actually surfaced.
      *
      * @param  array<int, int>  $productIds
-     * @return array<int, array<int, array{id: int, warehouse_id: int, qty: int}>> keyed by product id
+     * @return array<int, array<int, array{id: int, warehouse_id: int, qty: int, qty_on_hold: int}>> keyed by product id
      */
     public function getExistingStockBatch(array $productIds): array
     {
         return ProductWarehouseStock::whereIn('product_id', $productIds)
-            ->get(['id', 'product_id', 'warehouse_id', 'qty'])
+            ->get(['id', 'product_id', 'warehouse_id', 'qty', 'qty_on_hold'])
             ->groupBy('product_id')
             ->map(fn ($stocks) => $stocks->map(fn (ProductWarehouseStock $stock) => [
                 'id'           => $stock->id,
                 'warehouse_id' => $stock->warehouse_id,
                 'qty'          => $stock->qty,
+                'qty_on_hold'  => $stock->qty_on_hold,
             ])->values()->all())
             ->all();
     }
@@ -141,14 +142,19 @@ class BulkStock extends Page
                 }
 
                 foreach (($row['cells'] ?? []) as $warehouseId => $cell) {
+                    // qty and on_hold are each "blank = untouched" on their
+                    // own — an explicit 0 in either is still saved.
                     $qty = $cell['qty'] ?? null;
 
-                    // Blank means "untouched" — an explicit 0 is still saved.
-                    if ($qty === null || $qty === '') {
-                        continue;
+                    if ($qty !== null && $qty !== '') {
+                        ProductWarehouseStock::applyQty((int) $productId, (int) $warehouseId, (int) $qty);
                     }
 
-                    ProductWarehouseStock::applyQty((int) $productId, (int) $warehouseId, (int) $qty);
+                    $onHold = $cell['on_hold'] ?? null;
+
+                    if ($onHold !== null && $onHold !== '') {
+                        ProductWarehouseStock::applyOnHoldQty((int) $productId, (int) $warehouseId, (int) $onHold);
+                    }
                 }
 
                 $touchedProductIds[(int) $productId] = true;

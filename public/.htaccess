@@ -23,3 +23,11 @@
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+# Some base Ubuntu installs ship /etc/mime.types without an image/webp
+# entry, so Apache serves .webp with no Content-Type. The Media Library's
+# generated thumbnails are WebP, so declare the type here.
+<IfModule mod_mime.c>
+    AddType image/webp .webp
+    AddType image/avif .avif
+</IfModule>

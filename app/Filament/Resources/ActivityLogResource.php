@@ -37,6 +37,7 @@ class ActivityLogResource extends Resource
         'brochure'               => 'Brochure',
         'club_team'              => 'Club Team',
         'macron_catalog'         => 'Macron Catalog',
+        'media'                  => 'Media',
     ];
 
     public static function table(Table $table): Table
@@ -70,8 +71,10 @@ class ActivityLogResource extends Resource
                     ->label('Description')
                     ->wrap()
                     ->searchable(),
-                Tables\Columns\TextColumn::make('subject_id')
-                    ->label('Record #')
+                Tables\Columns\TextColumn::make('subject_ref')
+                    ->label('Record')
+                    ->state(fn (Activity $record) => self::describeSubject($record))
+                    ->placeholder('—')
                     ->toggleable(),
             ])
             ->filters([
@@ -112,6 +115,43 @@ class ActivityLogResource extends Resource
             ])
             ->defaultSort('created_at', 'desc')
             ->poll('60s');
+    }
+
+    /**
+     * Human-readable pointer to the record an entry is about, e.g.
+     * "Order #142" / "Product #57" — the log's module label (falling back
+     * to the model's short class name) plus the subject id. Used both by
+     * the list column and the view page so the order (or other record)
+     * number is always visible.
+     */
+    public static function describeSubject(?Activity $record): ?string
+    {
+        if (blank($record?->subject_id)) {
+            return null;
+        }
+
+        $label = self::MODULE_LABELS[$record->log_name]
+            ?? (filled($record->subject_type) ? class_basename($record->subject_type) : 'Record');
+
+        return "{$label} #{$record->subject_id}";
+    }
+
+    /**
+     * KeyValueEntry can only render scalar values. Entries logged by hand
+     * (orders) tuck nested arrays such as roster_changes into the change
+     * set, which blew up the view page with an htmlspecialchars() type
+     * error — flatten every value to a string first.
+     */
+    public static function stringifyChanges(mixed $changes): array
+    {
+        return collect($changes)
+            ->map(fn ($value) => match (true) {
+                is_null($value)   => '—',
+                is_bool($value)   => $value ? 'true' : 'false',
+                is_scalar($value) => (string) $value,
+                default           => json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            })
+            ->all();
     }
 
     public static function getPages(): array

@@ -47,6 +47,17 @@
         :is(.dark *) .pss-delta--pos { color: rgb(var(--success-400, var(--success-600))); }
         .pss-delta--neg { color: rgb(var(--danger-600)); }
         :is(.dark *) .pss-delta--neg { color: rgb(var(--danger-400, var(--danger-600))); }
+
+        /* On-hold controls */
+        .pss-hold-box { border-color: rgba(var(--warning-600), .4); background-color: rgba(var(--warning-600), .08); }
+        :is(.dark *) .pss-hold-box { border-color: rgba(var(--warning-600), .5); background-color: rgba(var(--warning-600), .14); }
+        .pss-hold-check-selected { border-color: rgb(var(--warning-600)); background-color: rgba(var(--warning-600), .18); color: rgb(var(--warning-700, var(--warning-600))); }
+        :is(.dark *) .pss-hold-check-selected { color: rgb(var(--warning-300, var(--warning-600))); }
+        .pss-hold-hint { color: rgb(var(--warning-700, var(--warning-600))); }
+        :is(.dark *) .pss-hold-hint { color: rgb(var(--warning-300, var(--warning-600))); }
+        .pss-hold-value { color: rgb(var(--warning-700, var(--warning-600))); }
+        :is(.dark *) .pss-hold-value { color: rgb(var(--warning-300, var(--warning-600))); }
+        .pss-banner--hold { background-color: rgb(var(--warning-600)); }
     </style>
 
     <div
@@ -188,14 +199,54 @@
                     <span x-show="product?.barcode" x-text="'  ·  Barcode: ' + product?.barcode"></span>
                 </p>
 
+                {{-- On-hold options. Both start unchecked; ticking one unticks
+                     the other (they can never be on together), and ticking a
+                     ticked box clears it so neither is on.
+                       • Put On Hold      — a REMOVE scan/update takes the units
+                                            out of stock and parks them in the
+                                            on-hold reserve instead of just
+                                            dropping them. No effect on an Add.
+                       • Update On Hold Qty — every scan/update in this mode
+                                            adds to / removes from the on-hold
+                                            reserve directly, leaving the main
+                                            stock quantity untouched. --}}
+                <div class="pss-hold-box mt-3 rounded-lg border p-2">
+                    <div class="grid grid-cols-2 gap-2">
+                        <button type="button" @click="toggleHold('put')"
+                            :class="holdMode === 'put'
+                                ? 'pss-hold-check-selected'
+                                : 'border-gray-300 bg-white text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200'"
+                            class="flex items-center gap-1.5 rounded-lg border-2 px-2 py-2 text-left text-xs font-semibold sm:text-sm">
+                            <span x-text="holdMode === 'put' ? '☑' : '☐'"></span>
+                            <span>Put On Hold</span>
+                        </button>
+                        <button type="button" @click="toggleHold('update')"
+                            :class="holdMode === 'update'
+                                ? 'pss-hold-check-selected'
+                                : 'border-gray-300 bg-white text-gray-700 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200'"
+                            class="flex items-center gap-1.5 rounded-lg border-2 px-2 py-2 text-left text-xs font-semibold sm:text-sm">
+                            <span x-text="holdMode === 'update' ? '☑' : '☐'"></span>
+                            <span>Update On Hold Qty</span>
+                        </button>
+                    </div>
+                    <p x-show="holdMode === 'put'" x-cloak class="pss-hold-hint mt-1.5 text-xs">
+                        Removing stock will move it into On Hold. Adding has no effect here.
+                    </p>
+                    <p x-show="holdMode === 'update'" x-cloak class="pss-hold-hint mt-1.5 text-xs">
+                        Scans / updates change On Hold only — the main stock quantity is left alone.
+                    </p>
+                </div>
+
                 <div class="mt-2 flex items-center justify-between gap-2">
-                    <span class="text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap">Qty here</span>
+                    <span class="text-sm text-gray-600 dark:text-gray-300 whitespace-nowrap"
+                        x-text="holdMode === 'update' ? 'On hold here' : 'Qty here'"></span>
                     <div class="flex items-center gap-2">
                         <button type="button" @click="applyDelta(-stepAmount)"
                             class="pss-adjust-minus whitespace-nowrap rounded-lg border-2 px-3 py-1.5 text-base font-bold">
                             − <span x-text="stepAmount"></span>
                         </button>
-                        <span class="pss-heading w-10 text-center text-2xl font-extrabold tabular-nums" x-text="product?.qty ?? 0"></span>
+                        <span class="pss-heading w-10 text-center text-2xl font-extrabold tabular-nums"
+                            x-text="(holdMode === 'update' ? (product?.qty_on_hold ?? 0) : (product?.qty ?? 0))"></span>
                         <button type="button" @click="applyDelta(stepAmount)"
                             class="pss-adjust-plus whitespace-nowrap rounded-lg border-2 px-3 py-1.5 text-base font-bold">
                             + <span x-text="stepAmount"></span>
@@ -203,12 +254,22 @@
                     </div>
                 </div>
 
+                {{-- Secondary read-out of the bucket not currently being edited. --}}
+                <div class="mt-1 flex items-center justify-between gap-2 text-xs">
+                    <span x-show="holdMode === 'update'" class="text-gray-500 dark:text-gray-400">In stock here</span>
+                    <span x-show="holdMode !== 'update'" class="pss-hold-value">On hold here</span>
+                    <span class="font-semibold tabular-nums"
+                        :class="holdMode === 'update' ? 'text-gray-500 dark:text-gray-400' : 'pss-hold-value'"
+                        x-text="(holdMode === 'update' ? (product?.qty ?? 0) : (product?.qty_on_hold ?? 0))"></span>
+                </div>
+
                 {{-- Manual entry — type a pile count (e.g. 100 pieces just picked)
                      and Update Stock adds or removes exactly that many from the
                      current total, per whichever mode (Add/Remove) is active
                      above. Always starts blank/0, never pre-filled with the
                      current stock — this is a quantity to apply, not a value to
-                     overwrite. --}}
+                     overwrite. With an on-hold box ticked it applies to the
+                     on-hold reserve per the rules above. --}}
                 <div class="mt-3 flex items-center gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
                     <input
                         type="number" inputmode="numeric" min="0" step="1"
@@ -221,7 +282,7 @@
                     <button type="button" @click="updateStock()"
                         :disabled="!mode || !manualQty"
                         class="flex-1 rounded-lg bg-primary-600 py-2.5 text-base font-bold text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50">
-                        <span x-text="mode === 'remove' ? 'Remove Stock' : 'Update Stock'"></span>
+                        <span x-text="updateButtonLabel()"></span>
                     </button>
                 </div>
             </div>
@@ -232,7 +293,11 @@
                 <ul class="divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
                     <template x-for="scan in recentScans" :key="scan.key">
                         <li class="flex items-center justify-between px-3 py-1.5 text-sm">
-                            <span class="truncate pr-2 text-gray-700 dark:text-gray-200" x-text="scan.name"></span>
+                            <span class="flex min-w-0 items-center gap-1.5 pr-2">
+                                <span x-show="scan.tag === 'hold'" x-cloak
+                                    class="pss-hold-value shrink-0 rounded px-1 text-[0.65rem] font-bold uppercase tracking-wide">hold</span>
+                                <span class="truncate text-gray-700 dark:text-gray-200" x-text="scan.name"></span>
+                            </span>
                             <span :class="scan.delta >= 0 ? 'pss-delta--pos' : 'pss-delta--neg'" class="font-semibold tabular-nums whitespace-nowrap">
                                 <span x-text="scan.delta >= 0 ? ('+' + scan.delta) : scan.delta"></span>
                                 → <span x-text="scan.qty"></span>
@@ -258,6 +323,9 @@
                 warehouseId: config.initialWarehouseId,
                 pendingWarehouseId: config.initialWarehouseId,
                 mode: null,
+                // '' = neither on-hold box ticked, 'put' = Put On Hold,
+                // 'update' = Update On Hold Qty. Only ever one at a time.
+                holdMode: '',
                 stepAmount: 1,
                 barcodeValue: '',
                 product: null,
@@ -277,6 +345,23 @@
 
                 currentWarehouseName() {
                     return this.warehouses.find(w => w.id === this.warehouseId)?.name ?? '';
+                },
+
+                // Ticking a box turns the other off; ticking the box that's
+                // already on clears it, so "neither" is always reachable.
+                toggleHold(which) {
+                    this.holdMode = this.holdMode === which ? '' : which;
+                    this.focusBarcode();
+                },
+
+                updateButtonLabel() {
+                    if (this.holdMode === 'update') {
+                        return this.mode === 'remove' ? 'Remove From Hold' : 'Add To Hold';
+                    }
+                    if (this.holdMode === 'put') {
+                        return this.mode === 'remove' ? 'Remove & Hold' : 'Update Stock';
+                    }
+                    return this.mode === 'remove' ? 'Remove Stock' : 'Update Stock';
                 },
 
                 confirmWarehouse() {
@@ -337,7 +422,7 @@
                 showBanner(text, kind) {
                     clearTimeout(this.bannerTimer);
                     this.banner = text;
-                    this.bannerKind = ['error', 'remove', 'add', 'info'].includes(kind) ? kind : 'info';
+                    this.bannerKind = ['error', 'remove', 'add', 'info', 'hold'].includes(kind) ? kind : 'info';
                     this.bannerTimer = setTimeout(() => { this.banner = ''; }, 2000);
                 },
 
@@ -389,7 +474,7 @@
                     // when it matches the item already on screen, commits
                     // the adjustment — half the latency of the old
                     // lookup-then-adjust pair of calls.
-                    this.$wire.call('scanBarcode', barcode, this.warehouseId, currentProductId, delta).then(result => {
+                    this.$wire.call('scanBarcode', barcode, this.warehouseId, currentProductId, delta, this.holdMode || 'none').then(result => {
                         if (!result) {
                             this.product = null;
                             this.vibrate([80, 60, 80]);
@@ -402,20 +487,23 @@
 
                         if (result.adjusted) {
                             this.vibrate(40);
-                            this.pushRecent(result.name, delta, result.qty);
-                            this.showBanner(
-                                (delta >= 0 ? '+' : '') + delta + ' — new qty: ' + result.qty,
-                                delta >= 0 ? 'add' : 'remove',
-                            );
+                            this.commitFeedback(result, delta);
                         } else {
                             // First scan of this item — just confirms what
                             // it is and its current stock. Scan it again to
                             // actually add/remove.
                             this.vibrate(20);
-                            this.showBanner(
-                                'Current stock: ' + result.qty + ' — scan again to ' + (this.mode === 'add' ? 'add' : 'remove'),
-                                'info',
-                            );
+                            if (this.holdMode === 'update') {
+                                this.showBanner(
+                                    'On hold: ' + result.qty_on_hold + ' — scan again to ' + (this.mode === 'add' ? 'add to' : 'remove from') + ' hold',
+                                    'info',
+                                );
+                            } else {
+                                this.showBanner(
+                                    'Current stock: ' + result.qty + ' (on hold: ' + result.qty_on_hold + ') — scan again to ' + (this.mode === 'add' ? 'add' : 'remove'),
+                                    'info',
+                                );
+                            }
                         }
 
                         this.focusBarcode();
@@ -427,15 +515,11 @@
 
                     const label = name ?? this.product.name;
 
-                    this.$wire.call('adjustStock', this.product.id, delta, this.warehouseId).then(result => {
+                    this.$wire.call('adjustStock', this.product.id, delta, this.warehouseId, this.holdMode || 'none').then(result => {
                         if (!result) return;
                         this.product = result;
-                        this.pushRecent(label, delta, result.qty);
                         this.vibrate(40);
-                        this.showBanner(
-                            (delta >= 0 ? '+' : '') + delta + ' — new qty: ' + result.qty,
-                            delta >= 0 ? 'add' : 'remove',
-                        );
+                        this.commitFeedback(result, delta, label);
                         this.focusBarcode();
                     });
                 },
@@ -451,22 +535,48 @@
 
                     const delta = this.mode === 'add' ? amount : -amount;
 
-                    this.$wire.call('adjustStock', this.product.id, delta, this.warehouseId).then(result => {
+                    this.$wire.call('adjustStock', this.product.id, delta, this.warehouseId, this.holdMode || 'none').then(result => {
                         if (!result) return;
                         this.product = result;
                         this.manualQty = 0;
-                        this.pushRecent(result.name, delta, result.qty);
                         this.vibrate(40);
-                        this.showBanner(
-                            (delta >= 0 ? '+' : '') + delta + ' — new qty: ' + result.qty,
-                            delta >= 0 ? 'add' : 'remove',
-                        );
+                        this.commitFeedback(result, delta);
                         this.focusBarcode();
                     });
                 },
 
-                pushRecent(name, delta, qty) {
-                    this.recentScans.unshift({ key: Date.now() + '-' + Math.random(), name, delta, qty });
+                // Post-movement banner + recent-scan row, worded for whichever
+                // bucket the units actually landed in (stock, or on-hold).
+                commitFeedback(result, delta, name = null) {
+                    const label = name ?? result.name;
+
+                    if (this.holdMode === 'update') {
+                        this.pushRecent(label, delta, result.qty_on_hold, 'hold');
+                        this.showBanner(
+                            (delta >= 0 ? '+' : '') + delta + ' on hold — now ' + result.qty_on_hold,
+                            'hold',
+                        );
+                        return;
+                    }
+
+                    if (this.holdMode === 'put' && delta < 0) {
+                        this.pushRecent(label, delta, result.qty, 'hold');
+                        this.showBanner(
+                            delta + ' to hold — stock ' + result.qty + ', on hold ' + result.qty_on_hold,
+                            'hold',
+                        );
+                        return;
+                    }
+
+                    this.pushRecent(label, delta, result.qty);
+                    this.showBanner(
+                        (delta >= 0 ? '+' : '') + delta + ' — new qty: ' + result.qty,
+                        delta >= 0 ? 'add' : 'remove',
+                    );
+                },
+
+                pushRecent(name, delta, qty, tag = null) {
+                    this.recentScans.unshift({ key: Date.now() + '-' + Math.random(), name, delta, qty, tag });
                     this.recentScans = this.recentScans.slice(0, 10);
                 },
             };

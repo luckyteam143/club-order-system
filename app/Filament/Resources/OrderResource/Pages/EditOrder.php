@@ -11,12 +11,20 @@ use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Filament\Support\Enums\MaxWidth;
 
 class EditOrder extends EditRecord
 {
     use PersistsOrderGrid;
 
     protected static string $resource = OrderResource::class;
+
+    // See CreateOrder::getMaxContentWidth() — same reasoning, so the item
+    // grid gets the same extra room on both pages.
+    public function getMaxContentWidth(): MaxWidth | string | null
+    {
+        return MaxWidth::Full;
+    }
 
     protected function getFooterWidgets(): array
     {
@@ -353,6 +361,7 @@ class EditOrder extends EditRecord
             'coach_manager' => 'Coach/Manager', 'shipping_address' => 'Shipping Address',
             'phone' => 'Phone', 'email' => 'Email', 'order_date' => 'Order Date',
             'b2b_number' => 'B2B Number', 'qb_invoice' => 'QB Invoice #', 'brochure_link' => 'Brochure Link',
+            'required_by_date' => 'Required By Date',
             'club_id' => 'Club', 'package_id' => 'Package', 'type' => 'Type', 'order_kind' => 'Order Kind', 'forecast_season' => 'Forecast Season',
         ];
 

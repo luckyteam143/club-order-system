@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\LogoTypeResource\Pages;
 
+use App\Filament\Concerns\HasFullWidthContent;
 use App\Filament\Resources\LogoTypeResource;
 use App\Imports\LogoTypeImport;
 use Filament\Actions;
@@ -13,6 +14,8 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class ListLogoTypes extends ListRecords
 {
+    use HasFullWidthContent;
+
     protected static string $resource = LogoTypeResource::class;
 
     protected function getHeaderActions(): array
@@ -39,7 +42,7 @@ class ListLogoTypes extends ListRecords
                     $path = Storage::disk('local')->path($data['file']);
 
                     try {
-                        $import = new LogoTypeImport();
+                        $import = new LogoTypeImport;
                         Excel::import($import, $path);
                     } catch (\Throwable $e) {
                         Storage::disk('local')->delete($data['file']);
@@ -57,8 +60,8 @@ class ListLogoTypes extends ListRecords
 
                     if ($import->failures()->isNotEmpty()) {
                         Notification::make()
-                            ->title('Import finished with ' . $import->failures()->count() . ' row error(s)')
-                            ->body($import->failures()->map(fn ($f) => 'Row ' . $f->row() . ': ' . implode(' ', $f->errors()))->implode('; '))
+                            ->title('Import finished with '.$import->failures()->count().' row error(s)')
+                            ->body($import->failures()->map(fn ($f) => 'Row '.$f->row().': '.implode(' ', $f->errors()))->implode('; '))
                             ->warning()
                             ->send();
                     } else {

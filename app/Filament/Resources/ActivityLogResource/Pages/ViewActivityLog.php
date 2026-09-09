@@ -31,14 +31,18 @@ class ViewActivityLog extends ViewRecord
                             ->label('Module')
                             ->formatStateUsing(fn (?string $state) => ActivityLogResource::MODULE_LABELS[$state] ?? ucfirst((string) $state)),
                         TextEntry::make('event')->label('Action')->badge(),
+                        TextEntry::make('subject_ref')
+                            ->label('Record')
+                            ->state(fn ($record) => ActivityLogResource::describeSubject($record))
+                            ->placeholder('—'),
                         TextEntry::make('description')->columnSpanFull(),
                     ]),
                 Section::make('Changes')
                     ->columns(2)
                     ->visible(fn ($record) => filled($record->attribute_changes?->get('attributes')))
                     ->schema([
-                        KeyValueEntry::make('changes_old')->label('Before')->state(fn ($record) => $record->attribute_changes?->get('old') ?? []),
-                        KeyValueEntry::make('changes_new')->label('After')->state(fn ($record) => $record->attribute_changes?->get('attributes') ?? []),
+                        KeyValueEntry::make('changes_old')->label('Before')->state(fn ($record) => ActivityLogResource::stringifyChanges($record->attribute_changes?->get('old') ?? [])),
+                        KeyValueEntry::make('changes_new')->label('After')->state(fn ($record) => ActivityLogResource::stringifyChanges($record->attribute_changes?->get('attributes') ?? [])),
                     ]),
             ]);
     }

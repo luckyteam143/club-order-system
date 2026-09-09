@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ActivityLogResource\Pages;
 
+use App\Filament\Concerns\HasFullWidthContent;
 use App\Filament\Resources\ActivityLogResource;
 use Filament\Actions;
 use Filament\Forms;
@@ -11,6 +12,8 @@ use Spatie\Activitylog\Models\Activity;
 
 class ListActivityLogs extends ListRecords
 {
+    use HasFullWidthContent;
+
     protected static string $resource = ActivityLogResource::class;
 
     protected function getHeaderActions(): array

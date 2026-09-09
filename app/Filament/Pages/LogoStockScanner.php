@@ -145,7 +145,8 @@ class LogoStockScanner extends Page
                 'logo_type' => $row->logoType?->name,
                 'stock_type' => $row->logo_stock_type,
                 'logo_name' => $row->logo_name,
-                'size'      => $row->size,
+                'width'     => $row->width,
+                'height'    => $row->height,
                 'location'  => $row->location,
                 'qty'       => (int) $row->qty,
             ])

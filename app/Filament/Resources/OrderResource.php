@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\OrderResource\Pages;
+use App\Models\Attribute;
 use App\Models\Club;
 use App\Models\ClubTeam;
 use App\Models\Embellishment;
@@ -13,7 +14,9 @@ use App\Models\Package;
 use App\Models\PackageProduct;
 use App\Models\Product;
 use App\Models\SponsorLogo;
+use App\Models\User;
 use Filament\Forms;
+use Filament\Forms\Components\Component;
 use Filament\Forms\Form;
 use Filament\Forms\Get;
 use Filament\Forms\Set;
@@ -22,27 +25,31 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\DB;
 
 class OrderResource extends Resource
 {
     protected static ?string $model = Order::class;
+
     protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-list';
+
     protected static ?string $navigationGroup = 'Orders';
+
     protected static ?int $navigationSort = 1;
 
     public const STATUSES = [
-        'draft'              => 'Draft',
-        'submitted'          => 'Submitted',
-        'pending'            => 'Pending',
-        'received'           => 'Received',
-        'in_production'      => 'In Production',
-        'partially_ready'    => 'Partially Ready',
-        'partially_picked'   => 'Partially Picked',
-        'partially_shipped'  => 'Partially Shipped',
-        'shipped'            => 'Shipped',
-        'completed'          => 'Completed',
-        'cancelled'          => 'Cancelled',
-        'admin_edit'         => 'Admin Edit',
+        'draft' => 'Draft',
+        'submitted' => 'Submitted',
+        'pending' => 'Pending',
+        'received' => 'Received',
+        'in_production' => 'In Production',
+        'partially_ready' => 'Partially Ready',
+        'partially_picked' => 'Partially Picked',
+        'partially_shipped' => 'Partially Shipped',
+        'shipped' => 'Shipped',
+        'completed' => 'Completed',
+        'cancelled' => 'Cancelled',
+        'admin_edit' => 'Admin Edit',
         'forecast_submitted' => 'Forecast Submitted',
     ];
 
@@ -65,36 +72,36 @@ class OrderResource extends Resource
     // `status` above (which already has a club-visible `partially_picked`
     // value) so picking progress can stay hidden from club users entirely.
     public const PICKING_STATUSES = [
-        'not_picked'        => 'Not Picked',
-        'partially_picked'  => 'Partially Picked',
-        'picked'            => 'Picked',
+        'not_picked' => 'Not Picked',
+        'partially_picked' => 'Partially Picked',
+        'picked' => 'Picked',
     ];
 
     public const PICKING_STATUS_COLORS = [
-        'not_picked'       => 'gray',
+        'not_picked' => 'gray',
         'partially_picked' => 'warning',
-        'picked'           => 'success',
+        'picked' => 'success',
     ];
 
     public const ORDER_KINDS = [
         'standard' => 'Standard Order',
-        'bulk'     => 'Bulk Order',
+        'bulk' => 'Bulk Order',
         'forecast' => 'Forecast',
     ];
 
     public const STATUS_COLORS = [
-        'draft'             => 'gray',
-        'submitted'         => 'primary',
-        'pending'           => 'gray',
-        'received'          => 'info',
-        'in_production'     => 'primary',
-        'partially_ready'   => 'warning',
-        'partially_picked'  => 'warning',
+        'draft' => 'gray',
+        'submitted' => 'primary',
+        'pending' => 'gray',
+        'received' => 'info',
+        'in_production' => 'primary',
+        'partially_ready' => 'warning',
+        'partially_picked' => 'warning',
         'partially_shipped' => 'warning',
-        'shipped'           => 'success',
-        'completed'         => 'success',
-        'cancelled'         => 'danger',
-        'admin_edit'        => 'warning',
+        'shipped' => 'success',
+        'completed' => 'success',
+        'cancelled' => 'danger',
+        'admin_edit' => 'warning',
         'forecast_submitted' => 'info',
     ];
 
@@ -145,7 +152,7 @@ class OrderResource extends Resource
 
                             Forms\Components\Select::make('type')
                                 ->options([
-                                    'package'    => 'Package',
+                                    'package' => 'Package',
                                     'individual' => 'Individual Items',
                                     'club_items' => 'Club Items',
                                 ])
@@ -164,7 +171,7 @@ class OrderResource extends Resource
                             Forms\Components\Select::make('order_kind')
                                 ->label('Order Kind')
                                 ->options([
-                                    'bulk'     => 'Bulk Order',
+                                    'bulk' => 'Bulk Order',
                                     'forecast' => 'Forecast',
                                 ])
                                 ->default('standard')
@@ -187,7 +194,7 @@ class OrderResource extends Resource
                                     : self::STATUSES)
                                 ->required()
                                 ->default('draft')
-                                ->disabled(fn () => !auth()->user()?->isAdmin())
+                                ->disabled(fn () => ! auth()->user()?->isAdmin())
                                 ->dehydrated()
                                 // Club users can't pick a status anyway (disabled
                                 // above already covers that) — this additionally
@@ -258,27 +265,34 @@ class OrderResource extends Resource
                                 ->createOptionUsing(function (array $data, Get $get) {
                                     return ClubTeam::create([
                                         ...$data,
-                                        'club_id'    => $get('club_id'),
-                                        'status'     => 'active',
+                                        'club_id' => $get('club_id'),
+                                        'status' => 'active',
                                         'sort_order' => (ClubTeam::where('club_id', $get('club_id'))->max('sort_order') ?? 0) + 1,
                                     ])->getKey();
                                 }),
-                            Forms\Components\TextInput::make('team_po')
-                                ->label('Team / PO #'),
-                            Forms\Components\TextInput::make('coach_manager')
-                                ->label('Coach / Manager'),
+                            Forms\Components\Grid::make(2)->schema([
+                                Forms\Components\TextInput::make('team_po')
+                                    ->label('Team / PO #'),
+                                Forms\Components\TextInput::make('coach_manager')
+                                    ->label('Coach / Manager'),
+                            ]),
                             Forms\Components\TextInput::make('shipping_address')
                                 ->label('Shipping Address')
                                 ->helperText('Prefilled from the club once selected — editable.')
                                 ->default(fn () => auth()->user()?->isClub() ? auth()->user()->club?->address : null),
-                            Forms\Components\TextInput::make('phone')
-                                ->label('Phone')
-                                ->tel()
-                                ->default(fn () => auth()->user()?->isClub() ? auth()->user()->club?->phone : null),
-                            Forms\Components\TextInput::make('email')
-                                ->label('Email')
-                                ->email()
-                                ->default(fn () => auth()->user()?->isClub() ? auth()->user()->club?->email : null),
+                            Forms\Components\Grid::make(2)->schema([
+                                Forms\Components\TextInput::make('phone')
+                                    ->label('Phone')
+                                    ->tel()
+                                    ->default(fn () => auth()->user()?->isClub() ? auth()->user()->club?->phone : null),
+                                Forms\Components\TextInput::make('email')
+                                    ->label('Email')
+                                    ->email()
+                                    ->default(fn () => auth()->user()?->isClub() ? auth()->user()->club?->email : null),
+                            ]),
+                            Forms\Components\DatePicker::make('required_by_date')
+                                ->label('Required By Date')
+                                ->helperText('When the club needs this order delivered by.'),
                         ])
                         ->columns(1),
 
@@ -305,18 +319,19 @@ class OrderResource extends Resource
             Forms\Components\ViewField::make('grid_state')
                 ->view('filament.forms.order-grid')
                 ->viewData([
-                    'products'               => self::productsCatalogForGrid(),
-                    'sponsorLogos'           => self::sponsorLogosCatalogForGrid(),
-                    'embellishments'         => self::embellishmentsCatalogForGrid(),
+                    'products' => self::productsCatalogForGrid(),
+                    'sizeOrder' => self::sizeOrderForGrid(),
+                    'sponsorLogos' => self::sponsorLogosCatalogForGrid(),
+                    'embellishments' => self::embellishmentsCatalogForGrid(),
                     'embellishmentPositions' => self::embellishmentPositionsCatalogForGrid(),
-                    'packages'               => self::packagesCatalogForGrid(),
-                    'clubItems'              => self::clubItemsCatalogForGrid(),
-                    'clubItemCrests'         => self::clubItemsCrestForGrid(),
-                    'canEditPrices'          => auth()->user()?->can('manage_order_pricing') ?? false,
+                    'packages' => self::packagesCatalogForGrid(),
+                    'clubItems' => self::clubItemsCatalogForGrid(),
+                    'clubItemCrests' => self::clubItemsCrestForGrid(),
+                    'canEditPrices' => auth()->user()?->can('manage_order_pricing') ?? false,
                     // Crest artwork (has_club_crest / crest_number) is admin-only in the
                     // grid — a club user still gets the values persisted to order_items
                     // (prefilled from the club item), they just don't edit them here.
-                    'showCrestControls'      => ! (auth()->user()?->isClub() ?? false),
+                    'showCrestControls' => ! (auth()->user()?->isClub() ?? false),
                 ])
                 ->default(json_encode(['columns' => [], 'rows' => [], 'sponsors' => [], 'embellishments' => []]))
                 ->dehydrateStateUsing(fn ($state) => is_string($state) ? $state : json_encode($state))
@@ -345,28 +360,42 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('id')->label('Order #')->sortable(),
                 Tables\Columns\TextColumn::make('club.name')->label('Club')->sortable()->searchable(),
                 Tables\Columns\TextColumn::make('clubTeam.team_name')->label('Team')->sortable()->searchable()->placeholder('—'),
+                Tables\Columns\TextColumn::make('team_po')
+                    ->label('Team / PO #')
+                    ->sortable()
+                    ->searchable()
+                    ->placeholder('—')
+                    ->toggleable(),
+                Tables\Columns\TextColumn::make('notes')
+                    ->label('Notes')
+                    ->limit(40)
+                    ->tooltip(fn (?string $state) => $state)
+                    ->wrap()
+                    ->placeholder('—')
+                    ->searchable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('type')
                     ->formatStateUsing(fn (?string $state) => match ($state) {
-                        'package'    => 'Package',
+                        'package' => 'Package',
                         'individual' => 'Individual',
                         'club_items' => 'Club Items',
-                        default      => $state,
+                        default => $state,
                     })
                     ->badge()
                     ->color(fn (?string $state) => match ($state) {
-                        'package'    => 'primary',
+                        'package' => 'primary',
                         'individual' => 'success',
                         'club_items' => 'warning',
-                        default      => 'gray',
+                        default => 'gray',
                     }),
                 Tables\Columns\TextColumn::make('order_kind')
                     ->label('Order Kind')
                     ->formatStateUsing(fn (?string $state) => self::ORDER_KINDS[$state] ?? $state)
                     ->badge()
                     ->color(fn (?string $state) => match ($state) {
-                        'bulk'     => 'info',
+                        'bulk' => 'info',
                         'forecast' => 'warning',
-                        default    => 'gray',
+                        default => 'gray',
                     }),
                 Tables\Columns\TextColumn::make('package.name')->label('Package')->toggleable(),
                 Tables\Columns\TextColumn::make('status')
@@ -397,7 +426,7 @@ class OrderResource extends Resource
                         : self::STATUSES),
                 Tables\Filters\SelectFilter::make('type')
                     ->options([
-                        'package'    => 'Package',
+                        'package' => 'Package',
                         'individual' => 'Individual',
                         'club_items' => 'Club Items',
                     ]),
@@ -428,7 +457,7 @@ class OrderResource extends Resource
                     ->visible(fn ($record) => $record->status === 'draft' && static::canManageClubOrder($record))
                     ->action(function ($record) {
                         $record->update([
-                            'status'       => 'submitted',
+                            'status' => 'submitted',
                             'submitted_at' => now(),
                         ]);
                     }),
@@ -439,6 +468,16 @@ class OrderResource extends Resource
                     ->visible(fn ($record) => static::canSendForPicking($record))
                     ->form(fn ($record) => static::sendForPickingFormSchema($record))
                     ->action(fn ($record, array $data) => static::applySendForPicking($record, $data)),
+                Tables\Actions\Action::make('viewBrochure')
+                    ->label('View Brochure')
+                    ->icon('heroicon-o-book-open')
+                    ->color('gray')
+                    // Shown to admin and club users alike whenever the order
+                    // has a brochure link set (editing the link stays
+                    // admin-only, in the form).
+                    ->visible(fn ($record) => filled($record->brochure_link))
+                    ->url(fn ($record) => $record->brochure_link)
+                    ->openUrlInNewTab(),
                 Tables\Actions\Action::make('export')
                     ->label('Export Excel')
                     ->icon('heroicon-o-arrow-down-tray')
@@ -475,64 +514,68 @@ class OrderResource extends Resource
      */
     public static function duplicateOrder(Order $source): Order
     {
-        return \Illuminate\Support\Facades\DB::transaction(function () use ($source) {
+        return DB::transaction(function () use ($source) {
             $source->loadMissing(['orderItems.sponsors', 'orderItems.embellishments', 'playerRows.itemCells']);
 
             $duplicate = Order::create([
-                'club_id'          => $source->club_id,
-                'club_team_id'     => $source->club_team_id,
-                'package_id'       => $source->package_id,
+                'club_id' => $source->club_id,
+                'club_team_id' => $source->club_team_id,
+                'package_id' => $source->package_id,
                 // Belongs to whoever duplicated it, not the original
                 // creator — otherwise a club sub-user duplicating an order
                 // wouldn't be able to see their own copy.
-                'created_by'       => auth()->id(),
-                'type'             => $source->type,
-                'order_kind'       => $source->order_kind,
-                'status'           => 'draft',
-                'is_copy'          => true,
-                'total'            => 0,
-                'notes'            => $source->notes,
-                'submitted_at'     => null,
-                'team_po'          => $source->team_po,
-                'coach_manager'    => $source->coach_manager,
+                'created_by' => auth()->id(),
+                'type' => $source->type,
+                'order_kind' => $source->order_kind,
+                'status' => 'draft',
+                'is_copy' => true,
+                'total' => 0,
+                'notes' => $source->notes,
+                'submitted_at' => null,
+                'team_po' => $source->team_po,
+                'coach_manager' => $source->coach_manager,
                 'shipping_address' => $source->shipping_address,
-                'phone'            => $source->phone,
-                'email'            => $source->email,
-                'order_date'       => now(),
-                'b2b_number'       => null,
-                'qb_invoice'       => null,
-                'brochure_link'    => $source->brochure_link,
+                'phone' => $source->phone,
+                'email' => $source->email,
+                'order_date' => now(),
+                'b2b_number' => null,
+                'qb_invoice' => null,
+                'brochure_link' => $source->brochure_link,
+                'required_by_date' => null,
             ]);
 
             $itemIdMap = [];
 
             foreach ($source->orderItems as $item) {
                 $newItem = $duplicate->orderItems()->create([
-                    'product_id'     => $item->product_id,
-                    'unit_price'     => $item->unit_price,
-                    'sort_order'     => $item->sort_order,
+                    'product_id' => $item->product_id,
+                    'unit_price' => $item->unit_price,
+                    'sort_order' => $item->sort_order,
                     'has_club_crest' => $item->has_club_crest,
-                    'crest_number'   => $item->crest_number,
+                    'crest_number' => $item->crest_number,
+                    'is_goalie_item' => $item->is_goalie_item,
+                    'is_player_item' => $item->is_player_item,
+                    'number_color' => $item->number_color,
                 ]);
 
                 $itemIdMap[$item->id] = $newItem->id;
 
                 foreach ($item->sponsors as $sponsor) {
                     $newItem->sponsors()->create([
-                        'sponsor_logo_id'           => $sponsor->sponsor_logo_id,
+                        'sponsor_logo_id' => $sponsor->sponsor_logo_id,
                         'embellishment_position_id' => $sponsor->embellishment_position_id,
-                        'price'                     => $sponsor->price,
-                        'brochure_link'             => $sponsor->brochure_link,
-                        'override_price'            => $sponsor->override_price,
+                        'price' => $sponsor->price,
+                        'brochure_link' => $sponsor->brochure_link,
+                        'override_price' => $sponsor->override_price,
                     ]);
                 }
 
                 foreach ($item->embellishments as $embellishment) {
                     $newItem->embellishments()->create([
-                        'embellishment_id'          => $embellishment->embellishment_id,
+                        'embellishment_id' => $embellishment->embellishment_id,
                         'embellishment_position_id' => $embellishment->embellishment_position_id,
-                        'price'                     => $embellishment->price,
-                        'override_price'            => $embellishment->override_price,
+                        'price' => $embellishment->price,
+                        'override_price' => $embellishment->override_price,
                     ]);
                 }
             }
@@ -540,10 +583,11 @@ class OrderResource extends Resource
             foreach ($source->playerRows as $row) {
                 $newRow = $duplicate->playerRows()->create([
                     'player_index' => $row->player_index,
-                    'player_name'  => $row->player_name,
-                    'number'       => $row->number,
-                    'initials'     => $row->initials,
-                    'notes'        => $row->notes,
+                    'player_name' => $row->player_name,
+                    'number' => $row->number,
+                    'initials' => $row->initials,
+                    'notes' => $row->notes,
+                    'section' => $row->section,
                 ]);
 
                 foreach ($row->itemCells as $cell) {
@@ -554,11 +598,11 @@ class OrderResource extends Resource
                     }
 
                     OrderItemCell::create([
-                        'order_item_id'       => $newItemId,
+                        'order_item_id' => $newItemId,
                         'order_player_row_id' => $newRow->id,
-                        'size'                => $cell->size,
-                        'qty'                 => $cell->qty,
-                        'line_total'          => $cell->line_total,
+                        'size' => $cell->size,
+                        'qty' => $cell->qty,
+                        'line_total' => $cell->line_total,
                     ]);
                 }
             }
@@ -606,13 +650,13 @@ class OrderResource extends Resource
             && $record->picking_status !== 'picked';
     }
 
-    /** @return array<\Filament\Forms\Components\Component> */
+    /** @return array<Component> */
     public static function sendForPickingFormSchema(Order $record): array
     {
         return [
             Forms\Components\Select::make('employee_id')
                 ->label('Assign to')
-                ->options(fn () => \App\Models\User::permission('pick_orders')->orderBy('name')->pluck('name', 'id'))
+                ->options(fn () => User::permission('pick_orders')->orderBy('name')->pluck('name', 'id'))
                 ->default($record->picking_assigned_to)
                 ->searchable()
                 ->required(),
@@ -625,10 +669,10 @@ class OrderResource extends Resource
 
         $record->update([
             'picking_assigned_to' => $data['employee_id'],
-            'picking_sent_at'     => now(),
+            'picking_sent_at' => now(),
         ]);
 
-        $employeeName = \App\Models\User::find($data['employee_id'])?->name ?? 'employee';
+        $employeeName = User::find($data['employee_id'])?->name ?? 'employee';
 
         // Order doesn't use the LogsActivity trait (see OrderActivityLog
         // widget) — picking's stock writes log against the ProductWarehouseStock
@@ -640,11 +684,11 @@ class OrderResource extends Resource
             ->performedOn($record)
             ->withChanges([
                 'attributes' => ['picking_assigned_to' => $employeeName],
-                'old'        => ['picking_assigned_to' => $previousAssignee],
+                'old' => ['picking_assigned_to' => $previousAssignee],
             ])
             ->log("Sent for picking to {$employeeName}");
 
-        \Filament\Notifications\Notification::make()->title('Order sent for picking')->success()->send();
+        Notification::make()->title('Order sent for picking')->success()->send();
     }
 
     public static function getRelations(): array
@@ -674,11 +718,11 @@ class OrderResource extends Resource
     public static function getPages(): array
     {
         return [
-            'index'       => Pages\ListOrders::route('/'),
-            'create'      => Pages\CreateOrder::route('/create'),
+            'index' => Pages\ListOrders::route('/'),
+            'create' => Pages\CreateOrder::route('/create'),
             'create-bulk' => Pages\CreateBulkOrder::route('/create-bulk'),
-            'view'        => Pages\ViewOrder::route('/{record}'),
-            'edit'        => Pages\EditOrder::route('/{record}/edit'),
+            'view' => Pages\ViewOrder::route('/{record}'),
+            'edit' => Pages\EditOrder::route('/{record}/edit'),
         ];
     }
 
@@ -692,14 +736,14 @@ class OrderResource extends Resource
         // in a Pivot instance) is what actually blows the memory limit —
         // pull everything through the query builder instead, which returns
         // lightweight stdClass rows.
-        $products = \Illuminate\Support\Facades\DB::table('products')
+        $products = DB::table('products')
             ->select(['id', 'name', 'retail_price'])
             ->whereNull('parent_sku')
             ->where('status', 'Active')
             ->orderBy('name')
             ->get();
 
-        $sizesByProductId = \Illuminate\Support\Facades\DB::table('attribute_product')
+        $sizesByProductId = DB::table('attribute_product')
             ->join('attributes', 'attributes.id', '=', 'attribute_product.attribute_id')
             ->whereIn('attribute_product.product_id', $products->pluck('id'))
             ->select(['attribute_product.product_id', 'attributes.name'])
@@ -710,8 +754,8 @@ class OrderResource extends Resource
 
         return $products
             ->map(fn ($product) => [
-                'id'    => $product->id,
-                'name'  => $product->name,
+                'id' => $product->id,
+                'name' => $product->name,
                 'price' => (float) $product->retail_price,
                 'sizes' => ($sizesByProductId->get($product->id) ?? collect())->pluck('name')->values()->all(),
             ])
@@ -719,14 +763,30 @@ class OrderResource extends Resource
             ->all();
     }
 
+    /**
+     * Every size name that exists, in Attribute position order — a single
+     * canonical ordering the Item/Size Summary sorts against (same
+     * approach as OrderExport's own $sizeOrder), instead of merging each
+     * item's own (correctly per-item-ordered) size list column by column.
+     * That merge only happens to come out right when every item shares an
+     * identical size set — with different subsets per item it can produce
+     * a wrong order (e.g. S, M, L, XS instead of XS, S, M, L).
+     *
+     * @return array<int, string>
+     */
+    private static function sizeOrderForGrid(): array
+    {
+        return Attribute::orderBy('position')->orderBy('name')->pluck('name')->all();
+    }
+
     private static function sponsorLogosCatalogForGrid(): array
     {
         return SponsorLogo::with('position')->orderBy('name')->get()
             ->map(fn (SponsorLogo $logo) => [
-                'id'          => $logo->id,
-                'name'        => $logo->name,
-                'price'       => (float) $logo->price,
-                'club_id'     => $logo->club_id,
+                'id' => $logo->id,
+                'name' => $logo->name,
+                'price' => (float) $logo->price,
+                'club_id' => $logo->club_id,
                 'position_id' => $logo->embellishment_position_id,
             ])
             ->values()
@@ -737,7 +797,7 @@ class OrderResource extends Resource
     {
         return EmbellishmentPosition::orderBy('name')->get()
             ->map(fn (EmbellishmentPosition $p) => [
-                'id'   => $p->id,
+                'id' => $p->id,
                 'name' => $p->name,
             ])
             ->values()
@@ -748,9 +808,9 @@ class OrderResource extends Resource
     {
         return Embellishment::orderBy('name')->get()
             ->map(fn (Embellishment $e) => [
-                'id'          => $e->id,
-                'name'        => $e->name,
-                'cost'        => (float) $e->cost,
+                'id' => $e->id,
+                'name' => $e->name,
+                'cost' => (float) $e->cost,
                 'position_id' => $e->embellishment_position_id,
             ])
             ->values()
@@ -768,7 +828,7 @@ class OrderResource extends Resource
      */
     private static function clubItemsCatalogForGrid(): array
     {
-        $pairs = \Illuminate\Support\Facades\DB::table('club_product')->select(['club_id', 'product_id', 'online_store_price'])->get();
+        $pairs = DB::table('club_product')->select(['club_id', 'product_id', 'online_store_price'])->get();
 
         return $pairs->groupBy('club_id')
             ->map(fn ($rows) => $rows->pluck('online_store_price', 'product_id')
@@ -786,14 +846,14 @@ class OrderResource extends Resource
      */
     private static function clubItemsCrestForGrid(): array
     {
-        $pairs = \Illuminate\Support\Facades\DB::table('club_product')
+        $pairs = DB::table('club_product')
             ->select(['club_id', 'product_id', 'has_club_crest', 'crest_number'])
             ->get();
 
         return $pairs->groupBy('club_id')
             ->map(fn ($rows) => $rows->mapWithKeys(fn ($r) => [$r->product_id => [
                 'has_club_crest' => (bool) $r->has_club_crest,
-                'crest_number'   => (int) ($r->crest_number ?? 1),
+                'crest_number' => (int) ($r->crest_number ?? 1),
             ]])->all())
             ->all();
     }
@@ -813,30 +873,33 @@ class OrderResource extends Resource
         return Package::all()->map(function (Package $package) use ($packageProductsByPackage, $productPrices) {
             $items = ($packageProductsByPackage->get($package->id) ?? collect())
                 ->map(fn (PackageProduct $packageProduct) => [
-                    'product_id'     => $packageProduct->product_id,
-                    'price'          => (float) ($packageProduct->per_item_price ?? $productPrices->get($packageProduct->product_id) ?? 0),
+                    'product_id' => $packageProduct->product_id,
+                    'price' => (float) ($packageProduct->per_item_price ?? $productPrices->get($packageProduct->product_id) ?? 0),
                     'has_club_crest' => (bool) $packageProduct->has_club_crest,
-                    'crest_number'   => (int) ($packageProduct->crest_number ?? 1),
-                    'sponsors'       => $packageProduct->sponsors->map(fn ($s) => [
-                        'sponsor_logo_id'           => $s->sponsor_logo_id,
+                    'crest_number' => (int) ($packageProduct->crest_number ?? 1),
+                    'is_goalie_item' => (bool) $packageProduct->is_goalie_item,
+                    'is_player_item' => (bool) $packageProduct->is_player_item,
+                    'number_color' => $packageProduct->number_color,
+                    'sponsors' => $packageProduct->sponsors->map(fn ($s) => [
+                        'sponsor_logo_id' => $s->sponsor_logo_id,
                         'embellishment_position_id' => $s->embellishment_position_id,
-                        'brochure_link'             => $s->brochure_link,
-                        'override_price'            => is_null($s->override_price) ? null : (float) $s->override_price,
+                        'brochure_link' => $s->brochure_link,
+                        'override_price' => is_null($s->override_price) ? null : (float) $s->override_price,
                     ])->values()->all(),
                     'embellishments' => $packageProduct->embellishments->map(fn ($e) => [
-                        'embellishment_id'          => $e->embellishment_id,
+                        'embellishment_id' => $e->embellishment_id,
                         'embellishment_position_id' => $e->embellishment_position_id,
-                        'override_price'            => is_null($e->override_price) ? null : (float) $e->override_price,
+                        'override_price' => is_null($e->override_price) ? null : (float) $e->override_price,
                     ])->values()->all(),
                 ])
                 ->values()
                 ->all();
 
             return [
-                'id'      => $package->id,
+                'id' => $package->id,
                 'club_id' => $package->club_id,
-                'price'   => (float) $package->price,
-                'items'   => $items,
+                'price' => (float) $package->price,
+                'items' => $items,
             ];
         })->values()->all();
     }

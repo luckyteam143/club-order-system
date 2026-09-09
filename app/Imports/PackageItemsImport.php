@@ -12,7 +12,8 @@ use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
 
 /**
- * Round-trips PackageItemsExport: ID, Barcode, Name, Qty, Price Override.
+ * Round-trips PackageItemsExport: ID, Barcode, Name, Qty, Price Override,
+ * Has Club Crest, Crest Number, Goalkeeper Item, Player Item.
  *
  * Non-destructive — package items not listed in the file are left untouched;
  * nothing is deleted by an import (remove items from the package in the UI).
@@ -26,16 +27,14 @@ use Maatwebsite\Excel\Concerns\WithHeadingRow;
  *
  * Blank Price Override = no override (null). Qty defaults to 1.
  */
-class PackageItemsImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
+class PackageItemsImport implements SkipsEmptyRows, ToCollection, WithHeadingRow
 {
     public int $imported = 0;
 
     /** @var list<string> */
     public array $errors = [];
 
-    public function __construct(private Package $package)
-    {
-    }
+    public function __construct(private Package $package) {}
 
     public function collection(Collection $rows): void
     {
@@ -69,7 +68,7 @@ class PackageItemsImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
                         continue;
                     }
 
-                    $packageProduct->update(['qty' => $qty, 'per_item_price' => $price] + $this->crestColumns($row));
+                    $packageProduct->update(['qty' => $qty, 'per_item_price' => $price] + $this->crestColumns($row) + $this->goaliePlayerColumns($row) + $this->numberColorColumn($row));
                     $this->imported++;
 
                     continue;
@@ -104,12 +103,12 @@ class PackageItemsImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
                 }
 
                 PackageProduct::create([
-                    'package_id'     => $this->package->id,
-                    'product_id'     => $product->id,
-                    'sort_order'     => $nextSort++,
-                    'qty'            => $qty,
+                    'package_id' => $this->package->id,
+                    'product_id' => $product->id,
+                    'sort_order' => $nextSort++,
+                    'qty' => $qty,
                     'per_item_price' => $price,
-                ] + $this->crestColumns($row));
+                ] + $this->crestColumns($row) + $this->goaliePlayerColumns($row) + $this->numberColorColumn($row));
 
                 $this->imported++;
             }
@@ -144,7 +143,50 @@ class PackageItemsImport implements ToCollection, WithHeadingRow, SkipsEmptyRows
 
         return [
             'has_club_crest' => $hasCrest,
-            'crest_number'   => $hasCrest && $number > 0 ? $number : 1,
+            'crest_number' => $hasCrest && $number > 0 ? $number : 1,
         ];
+    }
+
+    /**
+     * Same present-column guard as crestColumns() — only written when the
+     * file actually carries a "Goalkeeper Item" / "Player Item" column, so
+     * re-importing an older export leaves the existing flags untouched.
+     * Blank cells default to No (goalkeeper) / Yes (player).
+     *
+     * @return array{is_goalie_item?: bool, is_player_item?: bool}
+     */
+    private function goaliePlayerColumns(Collection $row): array
+    {
+        if (! $row->has('goalkeeper_item') && ! $row->has('player_item')) {
+            return [];
+        }
+
+        $yes = fn ($value) => in_array(strtolower(trim((string) $value)), ['1', 'yes', 'y', 'true', 't'], true);
+
+        $goalieFlag = trim((string) ($row['goalkeeper_item'] ?? ''));
+        $playerFlag = trim((string) ($row['player_item'] ?? ''));
+
+        return [
+            'is_goalie_item' => $goalieFlag === '' ? false : $yes($goalieFlag),
+            'is_player_item' => $playerFlag === '' ? true : $yes($playerFlag),
+        ];
+    }
+
+    /**
+     * Only written when the file actually carries a "Number Colour" column,
+     * so re-importing an older export leaves the existing value untouched.
+     * A blank cell clears the colour.
+     *
+     * @return array{number_color?: string|null}
+     */
+    private function numberColorColumn(Collection $row): array
+    {
+        if (! $row->has('number_colour') && ! $row->has('number_color')) {
+            return [];
+        }
+
+        $value = trim((string) ($row['number_colour'] ?? $row['number_color'] ?? ''));
+
+        return ['number_color' => $value === '' ? null : $value];
     }
 }

@@ -7,22 +7,34 @@ use App\Models\ProductWarehouseStock;
 use App\Models\Warehouse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Maatwebsite\Excel\Concerns\SkipsFailures;
-use Maatwebsite\Excel\Concerns\SkipsOnFailure;
+use Illuminate\Support\Str;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithChunkReading;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
-use Maatwebsite\Excel\Concerns\WithValidation;
 
 /**
- * Long-format stock import: one row per product x warehouse, matching
- * StockExport's own layout so a round-trip export -> edit -> import works.
- * Columns: Product ID (optional if Barcode given), Barcode, Product Name
- * (ignored — for reference only), Warehouse (name or code), Qty.
+ * Matrix-format stock import: one row per product, one column per
+ * warehouse — matching StockExport's own layout (and the Stock listing's
+ * on-screen grid) so a round-trip export -> edit -> import works.
+ * Columns: Product ID (optional if Barcode given), Barcode, Product Name /
+ * Size / Total Look (ignored — for reference only), then one qty column per
+ * active warehouse named after it. On Hold (all) and Total are read-only
+ * reference columns and are never imported — reserve qty is managed via the
+ * Scan Stock feature instead.
+ *
+ * Only warehouse columns actually present in the sheet are written — as
+ * with ProductsImport, omitting a warehouse's column leaves its stock
+ * untouched rather than zeroing it out.
  */
-class StockImport implements SkipsOnFailure, ToCollection, WithChunkReading, WithHeadingRow, WithValidation
+class StockImport implements ToCollection, WithChunkReading, WithHeadingRow
 {
-    use SkipsFailures;
+    /** @var Collection<int, Warehouse> */
+    private Collection $warehouses;
+
+    public function __construct()
+    {
+        $this->warehouses = Warehouse::where('status', 'active')->orderBy('name')->get(['id', 'name']);
+    }
 
     public function chunkSize(): int
     {
@@ -36,15 +48,20 @@ class StockImport implements SkipsOnFailure, ToCollection, WithChunkReading, Wit
 
             foreach ($rows as $row) {
                 $product = $this->resolveProduct($row);
-                $warehouse = $this->resolveWarehouse($row);
 
-                if (! $product || ! $warehouse) {
+                if (! $product) {
                     continue;
                 }
 
-                $qty = (int) ($row['qty'] ?? 0);
+                foreach ($this->warehouses as $warehouse) {
+                    $key = Str::slug($warehouse->name, '_');
 
-                ProductWarehouseStock::applyQty($product->id, $warehouse->id, $qty);
+                    if (! $row->has($key) || $row[$key] === null || $row[$key] === '') {
+                        continue;
+                    }
+
+                    ProductWarehouseStock::applyQty($product->id, $warehouse->id, (int) $row[$key]);
+                }
 
                 $touchedProductIds[$product->id] = true;
             }
@@ -68,26 +85,5 @@ class StockImport implements SkipsOnFailure, ToCollection, WithChunkReading, Wit
         $barcode = trim((string) ($row['barcode'] ?? ''));
 
         return $barcode === '' ? null : Product::where('barcode', $barcode)->first();
-    }
-
-    protected function resolveWarehouse(Collection $row): ?Warehouse
-    {
-        $name = trim((string) ($row['warehouse'] ?? ''));
-
-        if ($name === '') {
-            return null;
-        }
-
-        return Warehouse::where('name', $name)
-            ->orWhere('code', $name)
-            ->first();
-    }
-
-    public function rules(): array
-    {
-        return [
-            'warehouse' => 'required|string',
-            'qty'       => 'nullable|numeric',
-        ];
     }
 }

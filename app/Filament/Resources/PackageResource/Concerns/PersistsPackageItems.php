@@ -27,7 +27,9 @@ use Illuminate\Support\Facades\DB;
 trait PersistsPackageItems
 {
     protected ?array $packageItems = null;
+
     protected ?array $packageSponsors = null;
+
     protected ?array $packageEmbellishments = null;
 
     protected function buildItemsState(?Package $package): array
@@ -38,12 +40,15 @@ trait PersistsPackageItems
 
         return $package->packageProducts()->orderBy('sort_order')->get()
             ->map(fn (PackageProduct $packageProduct) => [
-                'id'             => $packageProduct->id,
-                'product_id'     => $packageProduct->product_id,
-                'qty'            => $packageProduct->qty,
+                'id' => $packageProduct->id,
+                'product_id' => $packageProduct->product_id,
+                'qty' => $packageProduct->qty,
                 'per_item_price' => $packageProduct->per_item_price,
                 'has_club_crest' => (bool) $packageProduct->has_club_crest,
-                'crest_number'   => (int) ($packageProduct->crest_number ?? 1),
+                'crest_number' => (int) ($packageProduct->crest_number ?? 1),
+                'is_goalie_item' => (bool) $packageProduct->is_goalie_item,
+                'is_player_item' => (bool) $packageProduct->is_player_item,
+                'number_color' => $packageProduct->number_color,
             ])
             ->values()
             ->all();
@@ -57,11 +62,11 @@ trait PersistsPackageItems
 
         return $package->packageProducts()->with('sponsors')->get()
             ->flatMap(fn (PackageProduct $packageProduct) => $packageProduct->sponsors->map(fn (PackageProductSponsor $s) => [
-                'product_id'                => $packageProduct->product_id,
-                'sponsor_logo_id'           => $s->sponsor_logo_id,
+                'product_id' => $packageProduct->product_id,
+                'sponsor_logo_id' => $s->sponsor_logo_id,
                 'embellishment_position_id' => $s->embellishment_position_id,
-                'brochure_link'             => $s->brochure_link,
-                'override_price'            => $s->override_price,
+                'brochure_link' => $s->brochure_link,
+                'override_price' => $s->override_price,
             ]))
             ->values()
             ->all();
@@ -75,10 +80,10 @@ trait PersistsPackageItems
 
         return $package->packageProducts()->with('embellishments')->get()
             ->flatMap(fn (PackageProduct $packageProduct) => $packageProduct->embellishments->map(fn (PackageProductEmbellishment $e) => [
-                'product_id'                => $packageProduct->product_id,
-                'embellishment_id'          => $e->embellishment_id,
+                'product_id' => $packageProduct->product_id,
+                'embellishment_id' => $e->embellishment_id,
                 'embellishment_position_id' => $e->embellishment_position_id,
-                'override_price'            => $e->override_price,
+                'override_price' => $e->override_price,
             ]))
             ->values()
             ->all();
@@ -100,16 +105,19 @@ trait PersistsPackageItems
                 $hasCrest = (bool) ($item['has_club_crest'] ?? true);
 
                 $attrs = [
-                    'package_id'     => $package->id,
-                    'product_id'     => (int) $productId,
+                    'package_id' => $package->id,
+                    'product_id' => (int) $productId,
                     // The Repeater's drag-and-drop reordering only changes
                     // its array position — this is what actually persists
                     // that order across page loads.
-                    'sort_order'     => $index,
-                    'qty'            => max(1, (int) ($item['qty'] ?? 1)),
+                    'sort_order' => $index,
+                    'qty' => max(1, (int) ($item['qty'] ?? 1)),
                     'per_item_price' => filled($item['per_item_price'] ?? null) ? (float) $item['per_item_price'] : null,
                     'has_club_crest' => $hasCrest,
-                    'crest_number'   => $hasCrest ? max(1, (int) ($item['crest_number'] ?? 1)) : 1,
+                    'crest_number' => $hasCrest ? max(1, (int) ($item['crest_number'] ?? 1)) : 1,
+                    'is_goalie_item' => (bool) ($item['is_goalie_item'] ?? false),
+                    'is_player_item' => (bool) ($item['is_player_item'] ?? true),
+                    'number_color' => blank($item['number_color'] ?? null) ? null : trim((string) $item['number_color']),
                 ];
 
                 // Matched by row id (not product_id) so the same product can
@@ -158,11 +166,11 @@ trait PersistsPackageItems
             }
 
             PackageProductSponsor::create([
-                'package_product_id'         => $packageProductId,
-                'sponsor_logo_id'            => $sponsorLogoId,
-                'embellishment_position_id'  => $sponsor['embellishment_position_id'] ?? null,
-                'brochure_link'              => blank($sponsor['brochure_link'] ?? null) ? null : $sponsor['brochure_link'],
-                'override_price'             => filled($sponsor['override_price'] ?? null) ? (float) $sponsor['override_price'] : null,
+                'package_product_id' => $packageProductId,
+                'sponsor_logo_id' => $sponsorLogoId,
+                'embellishment_position_id' => $sponsor['embellishment_position_id'] ?? null,
+                'brochure_link' => blank($sponsor['brochure_link'] ?? null) ? null : $sponsor['brochure_link'],
+                'override_price' => filled($sponsor['override_price'] ?? null) ? (float) $sponsor['override_price'] : null,
             ]);
         }
     }
@@ -183,10 +191,10 @@ trait PersistsPackageItems
             }
 
             PackageProductEmbellishment::create([
-                'package_product_id'         => $packageProductId,
-                'embellishment_id'           => $embellishmentId,
-                'embellishment_position_id'  => $embellishment['embellishment_position_id'] ?? null,
-                'override_price'             => filled($embellishment['override_price'] ?? null) ? (float) $embellishment['override_price'] : null,
+                'package_product_id' => $packageProductId,
+                'embellishment_id' => $embellishmentId,
+                'embellishment_position_id' => $embellishment['embellishment_position_id'] ?? null,
+                'override_price' => filled($embellishment['override_price'] ?? null) ? (float) $embellishment['override_price'] : null,
             ]);
         }
     }

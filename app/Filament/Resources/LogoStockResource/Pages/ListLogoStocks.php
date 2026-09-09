@@ -2,8 +2,9 @@
 
 namespace App\Filament\Resources\LogoStockResource\Pages;
 
-use App\Filament\Resources\LogoStockResource;
+use App\Filament\Concerns\HasFullWidthContent;
 use App\Filament\Pages\LogoStockScanner;
+use App\Filament\Resources\LogoStockResource;
 use App\Imports\LogoStockImport;
 use Filament\Actions;
 use Filament\Forms;
@@ -14,6 +15,8 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class ListLogoStocks extends ListRecords
 {
+    use HasFullWidthContent;
+
     protected static string $resource = LogoStockResource::class;
 
     protected function getHeaderActions(): array
@@ -43,7 +46,7 @@ class ListLogoStocks extends ListRecords
                     ini_set('memory_limit', '512M');
 
                     try {
-                        $import = new LogoStockImport();
+                        $import = new LogoStockImport;
                         Excel::import($import, $path);
                     } catch (\Throwable $e) {
                         Storage::disk('local')->delete($data['file']);
@@ -61,8 +64,8 @@ class ListLogoStocks extends ListRecords
 
                     if ($import->failures()->isNotEmpty()) {
                         Notification::make()
-                            ->title('Import finished with ' . $import->failures()->count() . ' row error(s)')
-                            ->body($import->failures()->map(fn ($f) => 'Row ' . $f->row() . ': ' . implode(' ', $f->errors()))->implode('; '))
+                            ->title('Import finished with '.$import->failures()->count().' row error(s)')
+                            ->body($import->failures()->map(fn ($f) => 'Row '.$f->row().': '.implode(' ', $f->errors()))->implode('; '))
                             ->warning()
                             ->send();
                     } else {

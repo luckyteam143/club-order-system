@@ -41,7 +41,13 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            // Host-relative on purpose: the admin (b2c.macronstore.ca) and
+            // club (clubs.macronstore.ca) panels share this one docroot, so
+            // a "/storage/…" URL resolves same-origin on whichever panel is
+            // open. An absolute APP_URL here made the club panel load images
+            // cross-origin, which blocked Filament's FileUpload preview
+            // (the image "kept loading" on the Edit Media screen).
+            'url' => env('STORAGE_URL', '/storage'),
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\ClubResource\Pages;
 use App\Models\Club;
+use App\Support\MediaPicker;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Get;
@@ -44,6 +45,8 @@ class ClubResource extends Resource
                     ->image()
                     ->maxSize(100)
                     ->helperText('PNG, JPG, or SVG — max 100KB.')
+                    ->columnSpanFull(),
+                MediaPicker::make('logo', 'Or choose the logo from the Media library')
                     ->columnSpanFull(),
                 Forms\Components\Textarea::make('notes')
                     ->label('Notes')

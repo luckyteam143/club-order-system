@@ -31,7 +31,7 @@ class PackageItemsExport implements FromCollection, WithHeadings, WithMapping, W
 
     public function headings(): array
     {
-        return ['ID', 'Barcode', 'Name', 'Qty', 'Price Override', 'Has Club Crest', 'Crest Number'];
+        return ['ID', 'Barcode', 'Name', 'Qty', 'Price Override', 'Has Club Crest', 'Crest Number', 'Goalkeeper Item', 'Player Item', 'Number Colour'];
     }
 
     public function collection(): Collection
@@ -52,6 +52,9 @@ class PackageItemsExport implements FromCollection, WithHeadings, WithMapping, W
             $packageProduct->per_item_price,
             $packageProduct->has_club_crest ? 'Yes' : 'No',
             $packageProduct->crest_number ?? 1,
+            $packageProduct->is_goalie_item ? 'Yes' : 'No',
+            $packageProduct->is_player_item ? 'Yes' : 'No',
+            $packageProduct->number_color,
         ];
     }
 

@@ -5,6 +5,7 @@ namespace App\Exports;
 use App\Models\Attribute;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\OrderPlayerRow;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithEvents;
@@ -73,7 +74,6 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
             'playerRows.itemCells',
         ]);
 
-        $isStaff = auth()->user()?->isAdmin() || auth()->user()?->isSubAdmin();
         $items = $this->order->orderItems;
 
         $sheet->getColumnDimension('A')->setWidth(28.1);
@@ -108,10 +108,8 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         $this->fillRange($sheet, "A{$barRow}:G{$barRow}", self::NAVY, self::WHITE, bold: true);
         $sheet->setCellValue("A{$barRow}", 'ORDER DETAILS');
 
-        if ($isStaff) {
-            $sheet->setCellValue("D{$barRow}", 'FOR OFFICE USE');
-            $this->fillRange($sheet, "D{$barRow}", self::BLACK, self::WHITE, bold: false);
-        }
+        $sheet->setCellValue("D{$barRow}", 'FOR OFFICE USE');
+        $this->fillRange($sheet, "D{$barRow}", self::BLACK, self::WHITE, bold: false);
         $row++;
 
         $leftFields = [
@@ -124,13 +122,14 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
             ['Email', $this->order->email],
         ];
 
-        $rightFields = $isStaff ? [
+        $rightFields = [
             ['Order Date', $this->order->order_date?->format('M j, Y') ?? ''],
             ['B2B Number', $this->order->b2b_number],
             ['QB Invoice #', $this->order->qb_invoice],
             ['Brochure Link', $this->order->brochure_link],
             ['Order Notes', $this->order->notes],
-        ] : [];
+            ['Required By Date', $this->order->required_by_date?->format('M j, Y') ?? ''],
+        ];
 
         for ($i = 0; $i < count($leftFields); $i++) {
             $r = $row + $i;
@@ -158,21 +157,57 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
 
         // Keep the office-use column's border grid flush with the taller
         // left column even past its own last field.
-        if ($isStaff) {
-            for ($i = count($rightFields); $i < count($leftFields); $i++) {
-                $r = $row + $i;
-                $this->styleField($sheet, "D{$r}", "E{$r}", false);
-            }
+        for ($i = count($rightFields); $i < count($leftFields); $i++) {
+            $r = $row + $i;
+            $this->styleField($sheet, "D{$r}", "E{$r}", false);
         }
 
         $row += count($leftFields) + 1;
 
-        // ── Roster ────────────────────────────────────────────────────
-        $roster = $this->buildRoster($sheet, $row, $items);
-        $row = $roster['nextRow'] + 1;
+        // ── Roster(s) ─────────────────────────────────────────────────
+        // A package item can be flagged Goalkeeper Item / Player Item
+        // independently — when the order actually carries any
+        // goalkeeper-flagged item, the roster splits into two separate
+        // tables (own columns, own player rows, by
+        // order_player_rows.section) mirroring the Order grid's on-screen
+        // split. Every other order keeps the single combined "ROSTER"
+        // table exactly as before this existed. Either way, the Item/Size
+        // Summary and every section below stay combined across both
+        // tables — buildItemSizeSummary() sums a COUNTIF per roster
+        // location an item appears in (one location = the exact same
+        // formula as before the split).
+        $hasGoalieItems = $items->contains(fn (OrderItem $item) => (bool) $item->is_goalie_item);
+        $itemLocations = [];
+
+        if ($hasGoalieItems) {
+            $goalieItems = $items->filter(fn (OrderItem $item) => (bool) $item->is_goalie_item)->values();
+            $playerItems = $items->filter(fn (OrderItem $item) => (bool) $item->is_player_item)->values();
+            $goalieRows = $this->order->playerRows->filter(fn ($r) => $r->section === 'goalie')->values();
+            $playerSectionRows = $this->order->playerRows->filter(fn ($r) => $r->section !== 'goalie')->values();
+
+            $goalieRoster = $this->buildRoster($sheet, $row, $goalieItems, $goalieRows, 'GOALKEEPER ROSTER');
+            $row = $goalieRoster['nextRow'] + 1;
+
+            $playerRoster = $this->buildRoster($sheet, $row, $playerItems, $playerSectionRows, 'PLAYER ROSTER');
+            $row = $playerRoster['nextRow'] + 1;
+
+            foreach ($goalieItems as $item) {
+                $itemLocations[$item->id][] = $this->rosterLocation($goalieRoster, $item->id);
+            }
+            foreach ($playerItems as $item) {
+                $itemLocations[$item->id][] = $this->rosterLocation($playerRoster, $item->id);
+            }
+        } else {
+            $roster = $this->buildRoster($sheet, $row, $items, $this->order->playerRows, 'ROSTER');
+            $row = $roster['nextRow'] + 1;
+
+            foreach ($items as $item) {
+                $itemLocations[$item->id] = [$this->rosterLocation($roster, $item->id)];
+            }
+        }
 
         // ── Item / Size Summary ─────────────────────────────────────
-        $row = $this->buildItemSizeSummary($sheet, $row, $items, $roster);
+        $row = $this->buildItemSizeSummary($sheet, $row, $items, $itemLocations);
         $row++;
 
         // ── Sponsor Logos & Embellishments ───────────────────────────
@@ -192,25 +227,33 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         $row++;
 
         // ── Player Number Digit Count ────────────────────────────────
-        $this->buildDigitCount($sheet, $row);
+        $this->buildDigitCount($sheet, $row, $items, $itemLocations);
     }
 
     /**
+     * Builds one roster table for the given items (as columns) and player
+     * rows (as data rows) — called once for a plain order (all items, all
+     * rows, titled "ROSTER"), or twice for a Package order with goalkeeper
+     * items (once per section, each with its own items/rows/title). See
+     * rosterLocation() and buildItemSizeSummary() for how a summary row
+     * combines results across however many tables an item appears in.
+     *
      * @param  Collection<int, OrderItem>  $items
+     * @param  Collection<int, OrderPlayerRow>  $rows
      * @return array{nextRow: int, itemCols: array<int, string>, headerRow: int, dataRowStart: int, dataRowEnd: int, formulasUsable: bool}
      */
-    private function buildRoster(Worksheet $sheet, int $row, Collection $items): array
+    private function buildRoster(Worksheet $sheet, int $row, Collection $items, Collection $rows, string $title = 'ROSTER'): array
     {
         $isBulk = in_array($this->order->order_kind, ['bulk', 'forecast'], true);
-        $sheet->setCellValue("A{$row}", 'ROSTER');
+        $sheet->setCellValue("A{$row}", $title);
         $this->plainTitle($sheet, "A{$row}");
         $row++;
 
         $headerRow = $row;
-        $lastCol = $this->colLetter(3 + $items->count() + 1); // Name, Number, Initials + items + Notes
+        $lastCol = $this->colLetter(3 + $items->count() + 1); // Name, Initials, Number + items + Notes
         $sheet->setCellValue("A{$headerRow}", 'Player Name');
-        $sheet->setCellValue("B{$headerRow}", 'Number');
-        $sheet->setCellValue("C{$headerRow}", 'Initials');
+        $sheet->setCellValue("B{$headerRow}", 'Initials');
+        $sheet->setCellValue("C{$headerRow}", 'Number');
 
         $itemCols = [];
         $col = 4; // D
@@ -256,13 +299,13 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         $dataRowStart = $row;
         $playerCount = 0;
 
-        foreach ($this->order->playerRows as $player) {
+        foreach ($rows as $player) {
             $cellsByItem = $isBulk ? collect() : $player->itemCells->keyBy('order_item_id');
             $playerCount++;
 
             $sheet->setCellValue("A{$row}", $isBulk ? '' : $player->player_name);
-            $sheet->setCellValue("B{$row}", $isBulk ? '' : $player->number);
-            $sheet->setCellValue("C{$row}", $isBulk ? '' : $player->initials);
+            $sheet->setCellValue("B{$row}", $isBulk ? '' : $player->initials);
+            $sheet->setCellValue("C{$row}", $isBulk ? '' : $player->number);
             $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_GENERAL);
             $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_CENTER);
             $this->bordered($sheet, "C{$row}", Alignment::HORIZONTAL_CENTER);
@@ -295,10 +338,42 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
     }
 
     /**
-     * @param  Collection<int, OrderItem>  $items
-     * @param  array{nextRow: int, itemCols: array<int, string>, dataRowStart: int, dataRowEnd: int, formulasUsable: bool}  $roster
+     * A single item's position(s) in the roster table(s) it appears in —
+     * one entry for a plain order or a single-section item, two for an
+     * item flagged both Goalkeeper Item and Player Item (it then shares
+     * one order_item but has a column in both roster tables).
+     *
+     * @param  array{itemCols: array<int, string>, headerRow: int, dataRowStart: int, dataRowEnd: int, formulasUsable: bool}  $roster
+     * @return array{col: string, headerRow: int, dataRowStart: int, dataRowEnd: int, formulasUsable: bool}|null
      */
-    private function buildItemSizeSummary(Worksheet $sheet, int $row, Collection $items, array $roster): int
+    private function rosterLocation(array $roster, int $itemId): ?array
+    {
+        $col = $roster['itemCols'][$itemId] ?? null;
+
+        if (! $col) {
+            return null;
+        }
+
+        return [
+            'col' => $col,
+            'headerRow' => $roster['headerRow'],
+            'dataRowStart' => $roster['dataRowStart'],
+            'dataRowEnd' => $roster['dataRowEnd'],
+            'formulasUsable' => $roster['formulasUsable'],
+        ];
+    }
+
+    /**
+     * Combined across every roster table — an item with two locations
+     * (goalkeeper + player) gets a formula that sums a COUNTIF per
+     * location; an item with its usual single location gets the exact
+     * same single-COUNTIF formula this produced before the roster could
+     * ever split, so a plain order's summary is byte-for-byte unchanged.
+     *
+     * @param  Collection<int, OrderItem>  $items
+     * @param  array<int, list<array{col: string, headerRow: int, dataRowStart: int, dataRowEnd: int, formulasUsable: bool}|null>>  $itemLocations  order item id => its roster location(s)
+     */
+    private function buildItemSizeSummary(Worksheet $sheet, int $row, Collection $items, array $itemLocations): int
     {
         $sheet->setCellValue("A{$row}", 'ITEM / SIZE SUMMARY');
         $this->plainTitle($sheet, "A{$row}");
@@ -306,8 +381,13 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
 
         $allCells = $this->order->playerRows->flatMap(fn ($player) => $player->itemCells);
 
+        // Every size any item on the order actually offers (its product's
+        // own Attribute list) — not just the ones someone has picked in the
+        // roster so far — so a size nobody ordered still gets its own
+        // (blank/zero) column instead of silently disappearing.
         $sizeOrder = Attribute::orderBy('position')->orderBy('name')->pluck('name')->flip();
-        $sizes = $allCells->pluck('size')->filter()->unique()
+        $sizes = $items->flatMap(fn (OrderItem $item) => $item->product?->attributes->pluck('name') ?? collect())
+            ->filter()->unique()
             ->sort(fn ($a, $b) => [$sizeOrder[$a] ?? PHP_INT_MAX, $a] <=> [$sizeOrder[$b] ?? PHP_INT_MAX, $b])
             ->values();
 
@@ -335,7 +415,6 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         // either way, so those stay formula-based unconditionally: SUM
         // doesn't care whether the cells it's adding are themselves
         // formulas or plain numbers.
-        $useFormulas = $roster['formulasUsable'] && $sizes->isNotEmpty();
         $useTotalFormulas = $sizes->isNotEmpty();
         $firstSizeCol = $this->colLetter(2);
         $lastSizeCol = $this->colLetter(1 + $sizes->count());
@@ -347,20 +426,34 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         foreach ($items as $item) {
             $itemCells = $allCells->where('order_item_id', $item->id);
             $itemTotal = 0;
-            $itemCol = $roster['itemCols'][$item->id] ?? null;
+            $locations = array_values(array_filter($itemLocations[$item->id] ?? []));
+
+            // Only formula-driven when every table this item appears in
+            // can support it — a single-location item (the common case,
+            // including every order this split doesn't apply to) reduces
+            // to exactly the one-COUNTIF formula built before the roster
+            // could ever split into two tables.
+            $useFormulas = $sizes->isNotEmpty() && $locations !== []
+                && collect($locations)->every(fn ($l) => $l['formulasUsable']);
+
+            $firstLocation = $locations[0] ?? null;
 
             // Point at the roster's own header cell rather than baking in
             // the name twice, so editing it there keeps this in sync.
-            $sheet->setCellValue("A{$row}", $itemCol ? "={$itemCol}{$roster['headerRow']}" : ($item->product?->name ?? 'Item'));
+            $sheet->setCellValue("A{$row}", $firstLocation ? "={$firstLocation['col']}{$firstLocation['headerRow']}" : ($item->product?->name ?? 'Item'));
             $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_LEFT, wrap: true);
 
             $col = 2;
             foreach ($sizes as $size) {
                 $cell = $this->colLetter($col)."{$row}";
 
-                if ($useFormulas && $itemCol) {
+                if ($useFormulas) {
                     $escaped = str_replace('"', '""', $size);
-                    $sheet->setCellValue($cell, "=COUNTIF({$itemCol}\${$roster['dataRowStart']}:{$itemCol}\${$roster['dataRowEnd']},\"{$escaped}\")");
+                    $countIfs = array_map(
+                        fn ($l) => "COUNTIF({$l['col']}\${$l['dataRowStart']}:{$l['col']}\${$l['dataRowEnd']},\"{$escaped}\")",
+                        $locations,
+                    );
+                    $sheet->setCellValue($cell, '='.implode('+', $countIfs));
                 } else {
                     $qty = (int) $itemCells->where('size', $size)->sum('qty');
                     $sheet->setCellValue($cell, $qty ?: '');
@@ -411,7 +504,7 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
 
     /**
      * @param  Collection<int, OrderItem>  $items
-     * @return int  the next free row
+     * @return int the next free row
      */
     private function buildSponsors(Worksheet $sheet, int $row, Collection $items): int
     {
@@ -569,57 +662,173 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
     }
 
     /**
-     * Frequency of each digit 0–9 across all roster player numbers — heat
-     * press number kits are bought per digit. Only digits that occur are
-     * listed. Bulk/forecast orders have no player numbers.
+     * Frequency of each digit 0–9 across roster player numbers — heat press
+     * number kits are bought per digit. Every Qty cell is a live formula
+     * over the roster's Number column (C), so editing a number in Excel
+     * re-tallies the counts (and the Total) automatically. All ten digits
+     * are always listed so a digit introduced by an edit still has a row.
+     * Bulk/forecast orders have no player numbers.
+     *
+     * When any item defines a Number Colour (package_product.number_color,
+     * snapshotted onto order_items), the count splits into one table per
+     * colour: a player's number is tallied once for every numbered garment
+     * they order in that colour (the formula multiplies the digit count by
+     * how many of that colour's item columns the player has a size in — a
+     * player with two navy items counts twice for navy). Items with no
+     * colour set are left out entirely. With no colours anywhere it stays
+     * a single combined table (each roster number counted once).
+     *
+     * @param  Collection<int, OrderItem>  $items
+     * @param  array<int, list<array{col: string, headerRow: int, dataRowStart: int, dataRowEnd: int, formulasUsable: bool}|null>>  $itemLocations
      */
-    private function buildDigitCount(Worksheet $sheet, int $row): void
+    private function buildDigitCount(Worksheet $sheet, int $row, Collection $items, array $itemLocations): void
     {
         $sheet->setCellValue("A{$row}", 'PLAYER NUMBER DIGIT COUNT');
         $this->plainTitle($sheet, "A{$row}");
         $row++;
 
+        $noNumbers = fn () => $sheet->setCellValue("A{$row}", 'No player numbers on this order.');
+
+        if (in_array($this->order->order_kind, ['bulk', 'forecast'], true)) {
+            $noNumbers();
+
+            return;
+        }
+
+        // Every usable roster location, flattened: an item id + the roster
+        // row range it lives in + its own size column in that roster.
+        $locations = [];
+        foreach ($itemLocations as $itemId => $locs) {
+            foreach (array_filter((array) $locs) as $loc) {
+                if ($loc['formulasUsable'] ?? false) {
+                    $locations[] = [
+                        'itemId' => (int) $itemId,
+                        'start' => (int) $loc['dataRowStart'],
+                        'end' => (int) $loc['dataRowEnd'],
+                        'col' => $loc['col'],
+                    ];
+                }
+            }
+        }
+
+        if ($locations === []) {
+            $noNumbers();
+
+            return;
+        }
+
+        // Number lives in column C of every roster. Counts how many times
+        // $digit occurs down one roster's Number column.
+        $countInNumbers = static fn (int $start, int $end, string $digit): string => 'LEN($C$'.$start.':$C$'.$end.')-LEN(SUBSTITUTE($C$'.$start.':$C$'.$end.',"'.$digit.'",""))';
+
+        // order_item id => its number colour, for items that actually set one.
+        $colourByItem = [];
+        foreach ($items as $item) {
+            $colour = trim((string) $item->number_color);
+            if ($colour !== '') {
+                $colourByItem[$item->id] = $colour;
+            }
+        }
+
+        // No colours anywhere — one combined table; each roster number
+        // counted once, so just sum a SUMPRODUCT per distinct roster range.
+        if ($colourByItem === []) {
+            $ranges = [];
+            foreach ($locations as $l) {
+                $ranges["{$l['start']}:{$l['end']}"] = [$l['start'], $l['end']];
+            }
+
+            $this->writeDigitTableFormulas($sheet, $row, function (string $digit) use ($ranges, $countInNumbers): string {
+                return implode('+', array_map(
+                    fn ($r) => 'SUMPRODUCT('.$countInNumbers($r[0], $r[1], $digit).')',
+                    $ranges,
+                ));
+            });
+
+            return;
+        }
+
+        // Per colour: group each colour's item size-columns by the roster
+        // range they sit in.
+        $byColour = [];
+        foreach ($locations as $l) {
+            $colour = $colourByItem[$l['itemId']] ?? null;
+            if ($colour === null) {
+                continue;
+            }
+
+            $key = mb_strtolower($colour);
+            $rangeKey = "{$l['start']}:{$l['end']}";
+            $byColour[$key]['label'] ??= $colour;
+            $byColour[$key]['ranges'][$rangeKey]['start'] = $l['start'];
+            $byColour[$key]['ranges'][$rangeKey]['end'] = $l['end'];
+            $byColour[$key]['ranges'][$rangeKey]['cols'][] = $l['col'];
+        }
+
+        if ($byColour === []) {
+            $noNumbers();
+
+            return;
+        }
+
+        ksort($byColour); // colours A–Z
+
+        $showLabels = count($byColour) > 1;
+
+        foreach ($byColour as $data) {
+            if ($showLabels) {
+                $sheet->setCellValue("A{$row}", $data['label']);
+                $this->fillRange($sheet, "A{$row}:B{$row}", self::NAVY, self::WHITE, bold: true);
+                $row++;
+            }
+
+            $row = $this->writeDigitTableFormulas($sheet, $row, function (string $digit) use ($data, $countInNumbers): string {
+                $parts = [];
+                foreach ($data['ranges'] as $r) {
+                    $presence = array_map(
+                        fn ($col) => '($'.$col.'$'.$r['start'].':$'.$col.'$'.$r['end'].'<>"")',
+                        $r['cols'],
+                    );
+                    // digit count × (how many of this colour's garments the player took)
+                    $parts[] = 'SUMPRODUCT(('.$countInNumbers($r['start'], $r['end'], $digit).')*('.implode('+', $presence).'))';
+                }
+
+                return implode('+', $parts);
+            }) + 2;
+        }
+    }
+
+    /**
+     * Writes a Digit / Qty table: header, one row per digit 0–9 whose Qty
+     * is `=<formulaFor($digit)>`, then a Total row that SUMs them. Returns
+     * the Total row.
+     *
+     * @param  callable(string): string  $formulaFor  digit ("0".."9") => formula body (no leading "=")
+     */
+    private function writeDigitTableFormulas(Worksheet $sheet, int $row, callable $formulaFor): int
+    {
         $headerRow = $row;
         $sheet->setCellValue("A{$headerRow}", 'Digit');
         $sheet->setCellValue("B{$headerRow}", 'Qty');
         $this->fillRange($sheet, "A{$headerRow}:B{$headerRow}", self::BLACK, self::WHITE, bold: false);
         $row++;
 
-        $digits = array_fill(0, 10, 0);
-
-        foreach ($this->order->playerRows as $player) {
-            foreach (str_split((string) $player->number) as $char) {
-                if ($char !== '' && ctype_digit($char)) {
-                    $digits[(int) $char]++;
-                }
-            }
-        }
-
-        if (array_sum($digits) === 0) {
-            $sheet->setCellValue("A{$row}", 'No player numbers on this order.');
-
-            return;
-        }
-
-        $total = 0;
+        $firstDataRow = $row;
 
         for ($d = 0; $d <= 9; $d++) {
-            if ($digits[$d] === 0) {
-                continue;
-            }
-
             $sheet->setCellValue("A{$row}", (string) $d);
-            $sheet->setCellValue("B{$row}", $digits[$d]);
+            $sheet->setCellValue("B{$row}", '='.$formulaFor((string) $d));
             $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_CENTER);
             $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_CENTER);
-            $total += $digits[$d];
             $row++;
         }
 
         $sheet->setCellValue("A{$row}", 'Total');
-        $sheet->setCellValue("B{$row}", $total);
+        $sheet->setCellValue("B{$row}", "=SUM(B{$firstDataRow}:B".($row - 1).')');
         $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_CENTER, bold: true);
         $this->bordered($sheet, "B{$row}", Alignment::HORIZONTAL_CENTER, bold: true);
+
+        return $row;
     }
 
     private function sponsorRow(Worksheet $sheet, int $row, string $item, string $type, string $name, string $position, float $price): void

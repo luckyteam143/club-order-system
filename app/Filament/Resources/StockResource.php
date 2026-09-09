@@ -59,7 +59,14 @@ class StockResource extends Resource
                 ->numeric()
                 ->default(0)
                 ->minValue(0),
-        ])->columns(3);
+            Forms\Components\TextInput::make('qty_on_hold')
+                ->label('On Hold')
+                ->helperText('Reserved / set-aside units — held separately from the available quantity above.')
+                ->required()
+                ->numeric()
+                ->default(0)
+                ->minValue(0),
+        ])->columns(2);
     }
 
     public static function table(Table $table): Table
@@ -114,6 +121,16 @@ class StockResource extends Resource
                     ->view('filament.tables.columns.stock-editable-cell')
                     ->extraCellAttributes(['data-label' => $warehouse->name])
                     ->getStateUsing(fn (Product $record) => $record->warehouseStocks->firstWhere('warehouse_id', $warehouse->id)?->qty ?? 0))->all(),
+                // Grand total of the on-hold reserve across every warehouse —
+                // the per-warehouse breakdown sits inline in each warehouse
+                // column next to its editable qty. Off by default to keep the
+                // row compact.
+                Tables\Columns\TextColumn::make('total_on_hold')->label('On Hold (all)')->numeric()->alignRight()
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->extraCellAttributes(['data-label' => 'On Hold (all)'])
+                    ->tooltip('Reserved / set-aside units across all warehouses — not part of the available Total.')
+                    ->color(fn ($state) => $state > 0 ? 'warning' : 'gray')
+                    ->getStateUsing(fn (Product $record) => (int) $record->warehouseStocks->sum('qty_on_hold')),
                 Tables\Columns\TextColumn::make('qty')->label('Total')->numeric()->sortable()->alignRight()
                     ->extraCellAttributes(['data-label' => 'Total'])
                     ->color(fn ($record) => match (true) {
@@ -139,6 +156,24 @@ class StockResource extends Resource
                     ->label('Edit')
                     ->icon('heroicon-o-pencil-square')
                     ->url(fn (Product $record) => StockResource::getUrl('bulk', ['q' => $record->barcode ?: $record->name])),
+            ])
+            ->bulkActions([
+                Tables\Actions\BulkAction::make('export')
+                    ->label('Export Selected to Excel')
+                    ->icon('heroicon-o-arrow-down-tray')
+                    ->color('gray')
+                    ->action(function (\Illuminate\Support\Collection $records) {
+                        // Selected sets are normally small, but keep the same
+                        // ceiling as the full export in case someone
+                        // select-alls the whole list.
+                        ini_set('memory_limit', '1024M');
+
+                        return \Maatwebsite\Excel\Facades\Excel::download(
+                            new \App\Exports\StockExport($records->pluck('id')->all()),
+                            'stock-selected-' . now()->format('Y-m-d') . '.xlsx',
+                        );
+                    })
+                    ->deselectRecordsAfterCompletion(),
             ])
             // Otherwise Filament defaults a whole-row click to this row
             // action's URL, which fights with clicking a warehouse cell to

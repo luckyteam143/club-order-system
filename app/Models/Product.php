@@ -3,6 +3,9 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 
@@ -26,34 +29,54 @@ class Product extends Model
         'weight' => 'decimal:2',
     ];
 
-    public function coSponsorship(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    public function coSponsorship(): BelongsTo
     {
         return $this->belongsTo(CoSponsorship::class);
     }
 
-    public function packages(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    /**
+     * The parent/master product this size variant belongs to, linked by
+     * `parent_sku` = the parent's own `default_sku` (see the FK added in
+     * 2026_08_31_130000). NULL on a parent product.
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(Product::class, 'parent_sku', 'default_sku');
+    }
+
+    /** Size variants that point at this product's `default_sku`. */
+    public function variants(): HasMany
+    {
+        return $this->hasMany(Product::class, 'parent_sku', 'default_sku');
+    }
+
+    public function packages(): BelongsToMany
     {
         return $this->belongsToMany(Package::class)->withPivot(['qty', 'per_item_price'])->withTimestamps();
     }
 
-    public function clubs(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    public function clubs(): BelongsToMany
     {
-        return $this->belongsToMany(Club::class)->withTimestamps();
+        // Mirror Club::products() — the club_product pivot carries this
+        // club's own pricing and crest settings for the product.
+        return $this->belongsToMany(Club::class)
+            ->withPivot(['id', 'club_price', 'online_store_price', 'has_club_crest', 'crest_number'])
+            ->withTimestamps();
     }
 
-    public function attributes(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    public function attributes(): BelongsToMany
     {
         return $this->belongsToMany(Attribute::class)->withTimestamps()
             ->orderBy('attributes.position')
             ->orderBy('attributes.name');
     }
 
-    public function orderItems(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function orderItems(): HasMany
     {
         return $this->hasMany(OrderItem::class);
     }
 
-    public function warehouseStocks(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function warehouseStocks(): HasMany
     {
         return $this->hasMany(ProductWarehouseStock::class);
     }
@@ -99,7 +122,7 @@ class Product extends Model
 
     public function getStockStatusAttribute(): string
     {
-        if ($this->qty === 0 && !$this->on_backorder) {
+        if ($this->qty === 0 && ! $this->on_backorder) {
             return 'out_of_stock';
         }
         if ($this->qty <= 5 && $this->qty > 0) {
@@ -108,6 +131,7 @@ class Product extends Model
         if ($this->on_backorder) {
             return 'backorder';
         }
+
         return 'in_stock';
     }
 }

@@ -112,6 +112,18 @@ class PackageResource extends Resource
                             ->default(1)
                             ->minValue(1)
                             ->visible(fn (Get $get) => (bool) $get('has_club_crest')),
+                        Forms\Components\Toggle::make('is_goalie_item')
+                            ->label('Goalkeeper Item')
+                            ->helperText('Shown in the order grid\'s separate Goalkeeper Items section.')
+                            ->default(false),
+                        Forms\Components\Toggle::make('is_player_item')
+                            ->label('Player Item')
+                            ->helperText('Shown in the order grid\'s Player Items section. An item can be both.')
+                            ->default(true),
+                        Forms\Components\TextInput::make('number_color')
+                            ->label('Number Colour')
+                            ->maxLength(50)
+                            ->helperText('Colour of the printed player number on this item (e.g. Navy, White). The order export tallies number digits separately per colour.'),
                     ])
                     ->columns(3)
                     ->columnSpanFull()
@@ -267,6 +279,8 @@ class PackageResource extends Resource
                     'per_item_price' => $packageProduct->per_item_price,
                     'has_club_crest' => $packageProduct->has_club_crest,
                     'crest_number'   => $packageProduct->crest_number,
+                    'is_goalie_item' => $packageProduct->is_goalie_item,
+                    'is_player_item' => $packageProduct->is_player_item,
                 ]);
 
                 foreach ($packageProduct->sponsors as $sponsor) {

@@ -17,6 +17,21 @@
     .col-\[--col-span-default\] {
         min-width: 0;
     }
+
+    /*
+        CreateOrder/EditOrder already override getMaxContentWidth() to drop
+        Filament's default 7xl (80rem) cap, but the page's own left/right
+        padding (px-4 md:px-6 lg:px-8, baked into Filament's compiled CSS —
+        not overridable via a Tailwind class here) still eats real width
+        from the item-column grid on top of that. :has() scopes this to
+        just the page this field is on, so it never touches any other
+        Filament page's padding.
+    */
+    .fi-main:has(.fi-order-grid) {
+        max-width: 100% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+    }
 </style>
 
 <div
@@ -26,6 +41,7 @@
         statePath: @js($getStatePath()),
         initial: @js($initial),
         products: @js($products),
+        sizeOrder: @js($sizeOrder),
         sponsorLogos: @js($sponsorLogos),
         embellishments: @js($embellishments),
         embellishmentPositions: @js($embellishmentPositions),
@@ -83,7 +99,7 @@
     <!--
         Three genuinely separate blocks side by side (not one table/grid
         with `position: sticky`) — sticky-in-a-scroll-container kept
-        failing in practice, so instead: Player/Number/Initials (left) and
+        failing in practice, so instead: Player/Initials/Number (left) and
         Notes/Row Total/Actions (right) each live in their own div that is
         never inside any scrolling element, so it is physically impossible
         for them to scroll. Only the middle block (item columns) has
@@ -110,6 +126,9 @@
                     <th class="p-2 font-medium text-gray-500 dark:text-gray-400">Item</th>
                     <th class="p-2 font-medium text-gray-500 dark:text-gray-400">Quantity by Size</th>
                     <th class="p-2 font-medium text-gray-500 dark:text-gray-400">Notes</th>
+                    @if ($showCrestControls)
+                    <th class="p-2 font-medium text-gray-500 dark:text-gray-400">Crest</th>
+                    @endif
                     <th class="p-2 text-right font-medium text-gray-500 dark:text-gray-400">Item Total</th>
                     <th class="w-8 p-2"></th>
                 </tr>
@@ -147,6 +166,22 @@
                                 placeholder="Notes for this item…"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                         </td>
+                        @if ($showCrestControls)
+                        <td class="p-2 align-top">
+                            <div class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                                <label class="flex items-center gap-1" title="This item carries the club crest">
+                                    <input type="checkbox" x-model="col.has_club_crest" @change="sync()"
+                                        :name="'has_club_crest_' + col.key" :id="'has_club_crest_' + col.key"
+                                        class="rounded border-gray-300 dark:border-gray-600">
+                                    <span>Crest</span>
+                                </label>
+                                <input type="number" min="1" step="1" x-show="col.has_club_crest" x-model.number="col.crest_number" @input="sync()"
+                                    :name="'crest_number_' + col.key" :id="'crest_number_' + col.key"
+                                    title="Which crest artwork (1, 2, 3…)"
+                                    class="fi-input w-9 !px-1 rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs">
+                            </div>
+                        </td>
+                        @endif
                         <td class="p-2 text-right align-top tabular-nums" x-text="bulkItemTotal(col)"></td>
                         <td class="p-2 align-top text-center">
                             <button type="button" x-show="canManageColumns()" @click="removeColumn(col.key)" class="text-gray-400 hover:text-danger-600" title="Remove item">🗑</button>
@@ -154,12 +189,15 @@
                     </tr>
                 </template>
                 <tr x-show="!columns.length">
-                    <td colspan="5" class="p-3 text-center text-sm text-gray-500 dark:text-gray-400">No items yet — use "+ Add Item Column" above.</td>
+                    <td colspan="{{ $showCrestControls ? 6 : 5 }}" class="p-3 text-center text-sm text-gray-500 dark:text-gray-400">No items yet — use "+ Add Item Column" above.</td>
                 </tr>
             </tbody>
             <tfoot x-show="columns.length">
                 <tr class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800">
                     <td class="p-2 font-semibold" colspan="3">Grand Total</td>
+                    @if ($showCrestControls)
+                    <td></td>
+                    @endif
                     <td class="p-2 text-right font-semibold tabular-nums" x-text="bulkGrandTotal()"></td>
                     <td></td>
                 </tr>
@@ -167,217 +205,37 @@
         </table>
     </div>
 
-    <div x-show="!isBulkType()" class="flex items-stretch overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700"
-        x-effect="columns.map((c) => c.product_id).join('|'); syncHeaderHeight()">
-        <!-- LEFT: Player Name / Number / Initials — fixed, never scrolls -->
-        <div class="grid shrink-0 border-r border-gray-200 text-sm dark:border-gray-700"
-            style="grid-template-columns: 10rem 5rem 5rem">
-            <div class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 text-left font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Player Name</div>
-            <div class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 text-left font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Number</div>
-            <div class="border-b border-gray-200 bg-gray-50 px-2 py-2 text-left font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Initials</div>
-
-            <template x-for="(row, rowIndex) in rows" :key="row.key">
-                <div style="display: contents">
-                    <div class="border-b border-r border-gray-100 p-1 dark:border-gray-800"
-                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
-                        <input type="text" x-model="row.player_name" placeholder="Player name" autocomplete="off"
-                            :name="'player_name_' + rowIndex" :id="'player_name_' + rowIndex"
-                            :data-row="rowIndex" data-col="player_name"
-                            @keydown.enter.prevent="navigate($event, 'down', true)"
-                            @keydown.down.prevent="navigate($event, 'down')"
-                            @keydown.up.prevent="navigate($event, 'up')"
-                            @paste="onPaste($event, rowIndex, 'player_name')"
-                            @input="row.player_name = row.player_name.toUpperCase(); sync()"
-                            class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                    </div>
-                    <div class="border-b border-r border-gray-100 p-1 dark:border-gray-800"
-                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
-                        <input type="text" x-model="row.number" placeholder="#" autocomplete="off"
-                            :name="'number_' + rowIndex" :id="'number_' + rowIndex"
-                            :data-row="rowIndex" data-col="number"
-                            @keydown.enter.prevent="navigate($event, 'down', true)"
-                            @keydown.down.prevent="navigate($event, 'down')"
-                            @keydown.up.prevent="navigate($event, 'up')"
-                            @paste="onPaste($event, rowIndex, 'number')"
-                            @input="sync()"
-                            class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                    </div>
-                    <div class="border-b border-gray-100 p-1 dark:border-gray-800"
-                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
-                        <input type="text" x-model="row.initials" placeholder="Init." autocomplete="off"
-                            :name="'initials_' + rowIndex" :id="'initials_' + rowIndex"
-                            :data-row="rowIndex" data-col="initials"
-                            @keydown.enter.prevent="navigate($event, 'down', true)"
-                            @keydown.down.prevent="navigate($event, 'down')"
-                            @keydown.up.prevent="navigate($event, 'up')"
-                            @paste="onPaste($event, rowIndex, 'initials')"
-                            @input="row.initials = row.initials.toUpperCase(); sync()"
-                            class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                    </div>
-                </div>
-            </template>
-
-            <!-- Matches the height of the middle block's mirrored scrollbar row so the footer row below stays aligned across all three blocks. -->
-            <div class="h-4 border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" style="grid-column: span 3"></div>
-            <div class="border-t border-gray-200 bg-gray-50 px-2 py-2 font-semibold dark:border-gray-700 dark:bg-gray-800" style="grid-column: span 3">Grand Total</div>
-        </div>
-
-        <!-- MIDDLE: item columns — the only thing that scrolls -->
-        <div class="min-w-0 flex-1 overflow-x-auto"
-            x-ref="hScroll" @scroll="if ($refs.hScrollMirror) $refs.hScrollMirror.scrollLeft = $event.target.scrollLeft">
-            <div class="grid text-sm" :style="'grid-template-columns: repeat(' + columns.length + ', 9rem)'">
-                <template x-for="col in columns" :key="col.key">
-                    <div x-ref="itemHeaderCell" class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 dark:border-gray-700 dark:bg-gray-800">
-                        <div class="flex items-start justify-between gap-1">
-                            <div class="min-w-0 flex-1">
-                                <p class="line-clamp-2 whitespace-normal break-words text-xs font-semibold leading-snug text-gray-900 dark:text-gray-100"
-                                    x-text="productName(col.product_id) || 'No item selected'"></p>
-                                <input type="text" list="order-grid-products" autocomplete="off"
-                                    :name="'product_' + col.key" :id="'product_' + col.key"
-                                    :value="productName(col.product_id)"
-                                    @change="onProductInput($event, col)"
-                                    placeholder="Type to search / change…"
-                                    class="fi-input mt-1 w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs">
-                            </div>
-                            <button type="button" x-show="canManageColumns()" @click="removeColumn(col.key)"
-                                class="shrink-0 text-gray-400 hover:text-danger-600" title="Remove item">✕</button>
-                        </div>
-                        <div class="mt-1 flex items-center gap-1">
-                            <span class="text-xs text-gray-500">$</span>
-                            <input type="number" step="0.01" x-model.number="col.unit_price" autocomplete="off"
-                                :name="'unit_price_' + col.key" :id="'unit_price_' + col.key"
-                                :disabled="!canEditPrices" :title="!canEditPrices ? 'Only an admin can change pricing' : null"
-                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs disabled:cursor-not-allowed disabled:opacity-60">
-                        </div>
-                        {{-- Crest artwork selection is an admin/production concern — club
-                             users never see it. The col.has_club_crest / col.crest_number
-                             values are still carried on the column object (prefilled from
-                             the club item, default crest-on / #1) and persisted to
-                             order_items, they're just not editable here for a club user. --}}
-                        @if ($showCrestControls)
-                        <div class="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                            <label class="flex items-center gap-1" title="This item carries the club crest">
-                                <input type="checkbox" x-model="col.has_club_crest" @change="sync()"
-                                    :name="'has_club_crest_' + col.key" :id="'has_club_crest_' + col.key"
-                                    class="rounded border-gray-300 dark:border-gray-600">
-                                <span>Crest</span>
-                            </label>
-                            <input type="number" min="1" step="1" x-show="col.has_club_crest" x-model.number="col.crest_number" @input="sync()"
-                                :name="'crest_number_' + col.key" :id="'crest_number_' + col.key"
-                                title="Which crest artwork (1, 2, 3…)"
-                                class="fi-input w-12 rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-xs">
-                        </div>
-                        @endif
-                    </div>
-                </template>
-
-                <template x-for="(row, rowIndex) in rows" :key="row.key">
-                    <div style="display: contents">
-                        <template x-for="col in columns" :key="col.key">
-                            <div class="border-b border-r border-gray-100 p-1 dark:border-gray-800"
-                                :class="isCellChanged(row.key, col.key)
-                                    ? 'ring-2 ring-inset ring-orange-400 bg-orange-50 dark:bg-orange-950/40'
-                                    : (rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40')"
-                                :title="isCellChanged(row.key, col.key) ? 'Changed in the most recent save' : null"
-                                x-init="ensureCell(row, col.key)">
-                                <input type="text" x-show="col.product_id" autocomplete="off"
-                                    :list="'order-grid-sizes-' + rowIndex + '-' + col.key"
-                                    :name="'size_' + rowIndex + '_' + col.key" :id="'size_' + rowIndex + '_' + col.key"
-                                    :value="row.cells[col.key] ? row.cells[col.key].size : ''"
-                                    :data-row="rowIndex" :data-col="col.key"
-                                    placeholder="Size…"
-                                    :class="(row.cells[col.key] && row.cells[col.key].invalid)
-                                        ? 'fi-input w-full rounded-md text-sm border-danger-500 bg-danger-50 dark:bg-danger-950 focus:border-danger-500 focus:ring-danger-500'
-                                        : 'fi-input w-full rounded-md text-sm border-gray-300 dark:border-gray-600 dark:bg-gray-900'"
-                                    @keydown.enter.prevent="navigate($event, 'down', true)"
-                                    @keydown.down.prevent="navigate($event, 'down')"
-                                    @keydown.up.prevent="navigate($event, 'up')"
-                                    @paste="onPaste($event, rowIndex, col.key)"
-                                    @input="onSizeTyping($event, row, col)"
-                                    @change="onSizeInput($event, row, col)">
-                                <datalist :id="'order-grid-sizes-' + rowIndex + '-' + col.key">
-                                    <template x-for="size in productSizes(col)" :key="size">
-                                        <option :value="size"></option>
-                                    </template>
-                                </datalist>
-                            </div>
-                        </template>
-                    </div>
-                </template>
-
-                <!--
-                    A second, mirrored horizontal scrollbar sitting right
-                    above Grand Total — dragging it (or the one at the
-                    bottom of this block) scrolls both together via the
-                    @scroll listeners on each, so it's reachable without
-                    scrolling all the way down a long roster first.
-                -->
-                <div x-show="columns.length" class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800"
-                    :style="'grid-column: span ' + columns.length"
-                    x-ref="hScrollMirror" @scroll="$refs.hScroll.scrollLeft = $event.target.scrollLeft">
-                    <div class="h-4" :style="'width: ' + (columns.length * 9) + 'rem'"></div>
-                </div>
-
-                <div class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" :style="'grid-column: span ' + columns.length"></div>
+    <!--
+        Package orders whose selected package has at least one item flagged
+        Goalkeeper Item (PackageResource > Products in Package) get a
+        second, separate roster block above the regular one: its own
+        columns (only that package's goalkeeper-flagged items), its own
+        rows (a goalkeeper is a different roster entry than an outfield
+        player), and its own independent Add/Remove/Duplicate Row controls
+        — see order-grid-roster.blade.php. Every other order type (and a
+        package with no goalkeeper items) only ever renders the Player
+        Items block, unchanged from before this existed. Item/Size Summary
+        and the Sponsor Logos / Embellishments sections below both still
+        iterate the single flat `columns`/`rows` arrays, so they cover both
+        blocks automatically without any extra wiring.
+    -->
+    <div x-show="!isBulkType()">
+        <template x-if="isPackageType() && hasGoalieItems()">
+            <div class="mb-6">
+                <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Goalkeeper Items</h4>
+                @include('filament.forms.partials.order-grid-roster', ['section' => 'goalie'])
             </div>
+        </template>
+
+        <div>
+            <h4 x-show="isPackageType() && hasGoalieItems()" class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Player Items</h4>
+            @include('filament.forms.partials.order-grid-roster', ['section' => 'player'])
         </div>
 
-        <!-- RIGHT: Notes / Row Total / Actions — fixed, never scrolls -->
-        <div class="grid shrink-0 border-l border-gray-200 text-sm dark:border-gray-700"
-            style="grid-template-columns: 10rem 6rem 40px">
-            <div class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 text-left font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Notes</div>
-            <div class="border-b border-r border-gray-200 bg-gray-50 px-2 py-2 text-right font-medium dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'">Row Total</div>
-            <div class="border-b border-gray-200 bg-gray-50 px-2 py-2 dark:border-gray-700 dark:bg-gray-800" :style="'min-height: ' + headerHeight + 'px'"></div>
-
-            <template x-for="(row, rowIndex) in rows" :key="row.key">
-                <div style="display: contents">
-                    <div class="border-b border-r border-gray-100 p-1 dark:border-gray-800"
-                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
-                        <input type="text" x-model="row.notes" placeholder="Notes" autocomplete="off"
-                            :name="'notes_' + rowIndex" :id="'notes_' + rowIndex"
-                            :data-row="rowIndex" data-col="notes"
-                            @keydown.enter.prevent="navigate($event, 'down', true)"
-                            @keydown.down.prevent="navigate($event, 'down')"
-                            @keydown.up.prevent="navigate($event, 'up')"
-                            @paste="onPaste($event, rowIndex, 'notes')"
-                            @input="sync()"
-                            class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-                    </div>
-                    <div class="border-b border-r border-gray-100 p-1 text-right font-medium tabular-nums dark:border-gray-800"
-                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'"
-                        x-text="'$' + rowTotal(row).toFixed(2)"></div>
-                    <div class="border-b border-gray-100 p-1 text-center whitespace-nowrap dark:border-gray-800"
-                        :class="rowIndex % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/40'">
-                        <button type="button" @click="duplicateRow(row.key)" class="text-gray-400 hover:text-primary-600" title="Duplicate this row">⧉</button>
-                        <button type="button" @click="removeRow(row.key)" class="text-gray-400 hover:text-danger-600" title="Remove row">🗑</button>
-                    </div>
-                </div>
-            </template>
-
-            <!-- Matches the height of the middle block's mirrored scrollbar row so the footer row below stays aligned across all three blocks. -->
-            <div class="h-4 border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800" style="grid-column: span 3"></div>
-
-            <div class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800"></div>
-            <div class="border-t border-gray-200 bg-gray-50 px-2 py-2 text-right font-semibold tabular-nums dark:border-gray-700 dark:bg-gray-800"
-                x-text="'$' + grandTotal().toFixed(2)"></div>
-            <div class="border-t border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-800"></div>
-        </div>
-    </div>
-
-    <div class="flex flex-wrap items-center gap-2 mt-2" x-show="!isBulkType()">
-        <button type="button" @click="addRow()"
-            class="fi-btn inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
-            + Add Row
-        </button>
-
-        <div class="inline-flex items-center gap-1">
-            <input type="number" min="1" max="500" x-model.number="bulkAddCount" autocomplete="off"
-                name="bulk_add_count" id="bulk_add_count"
-                class="fi-input w-16 rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
-            <button type="button" @click="addRows(bulkAddCount)"
-                class="fi-btn inline-flex items-center gap-1 rounded-lg bg-gray-100 dark:bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600">
-                + Add Rows
-            </button>
+        <div x-show="isPackageType() && hasGoalieItems()" class="mt-2 flex justify-end">
+            <div class="rounded-lg bg-gray-100 dark:bg-gray-800 px-4 py-2 text-sm font-semibold">
+                Grand Total (Goalkeeper + Player): <span x-text="'$' + grandTotal().toFixed(2)"></span>
+            </div>
         </div>
     </div>
 
@@ -426,7 +284,7 @@
                 </tfoot>
             </table>
         </div>
-        <p x-show="!summarySizes().length" class="text-xs text-gray-500 dark:text-gray-400">No sizes entered yet.</p>
+        <p x-show="!summarySizes().length" class="text-xs text-gray-500 dark:text-gray-400">No items with sizes on this order yet.</p>
     </div>
 
     <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -588,6 +446,7 @@ function orderGrid(config) {
     return {
         statePath: config.statePath,
         products: config.products,
+        sizeOrder: config.sizeOrder,
         sponsorLogos: config.sponsorLogos,
         embellishments: config.embellishments,
         embellishmentPositions: config.embellishmentPositions,
@@ -599,7 +458,9 @@ function orderGrid(config) {
         rows: [],
         sponsorRows: [],
         embellishmentRows: [],
-        bulkAddCount: 5,
+        // Keyed by section ('player' | 'goalie') — each roster block gets
+        // its own independent "+ Add Rows" count.
+        bulkAddCount: { player: 5, goalie: 5 },
 
         // Cells touched by the most recent post-submission save (see
         // EditOrder::logOrderUpdate()) — highlighted in orange so a reviewer
@@ -616,12 +477,15 @@ function orderGrid(config) {
         // varies with product name length) and mirrors it onto the other
         // two panels' headers, instead of guessing a fixed px value that
         // drifts out of sync the moment a name wraps to a second line.
-        headerHeight: 88,
+        // Keyed by section — the Goalkeeper and Player blocks are separate
+        // DOM trees with independently-sized headers.
+        headerHeight: { player: 88, goalie: 88 },
 
-        syncHeaderHeight() {
+        syncHeaderHeight(section) {
             this.$nextTick(() => {
-                if (this.$refs.itemHeaderCell) {
-                    this.headerHeight = Math.max(88, this.$refs.itemHeaderCell.offsetHeight);
+                const ref = this.$refs['itemHeaderCell_' + section];
+                if (ref) {
+                    this.headerHeight[section] = Math.max(88, ref.offsetHeight);
                 }
             });
         },
@@ -643,6 +507,11 @@ function orderGrid(config) {
         // never needs resetting back to false.
         formSubmitting: false,
 
+        // Holds the order Type we're programmatically reverting to after a
+        // cancelled "switching type clears the items" prompt, so the type
+        // watcher can tell that echo apart from a real user change.
+        typeRevertGuard: null,
+
         init() {
             this.columns = (config.initial.columns || []).map(c => ({ ...c }));
             this.rows = (config.initial.rows || []).map(r => ({ ...r, cells: { ...(r.cells || {}) } }));
@@ -653,10 +522,6 @@ function orderGrid(config) {
             this.ensureAllCells();
             this.checkForLocalDraft();
 
-            if (this.rows.length === 0) {
-                this.addRow();
-            }
-
             // Package orders default to one column per package item — load them
             // automatically the first time, and keep them in sync if the club/
             // package selection changes.
@@ -664,12 +529,39 @@ function orderGrid(config) {
                 this.loadPackageItems();
             }
 
+            this.ensureDefaultRows();
+
             this.$watch(() => this.$wire.data.package_id, () => {
                 if (this.isPackageType()) this.loadPackageItems();
             });
 
-            this.$watch(() => this.$wire.data.type, () => {
-                if (this.isPackageType() && this.$wire.data.package_id) this.loadPackageItems();
+            // Changing the order Type invalidates the current item columns
+            // (a Package's items mean nothing on an Individual / Club Items
+            // order, and vice versa). Warn before throwing away anything the
+            // user has entered, and revert the dropdown if they cancel;
+            // otherwise reset the item section to the new type's starting
+            // layout.
+            this.$watch(() => this.$wire.data.type, (newType, oldType) => {
+                if (newType === this.typeRevertGuard) { this.typeRevertGuard = null; return; }
+                if (newType === oldType) return;
+
+                if (this.columns.length > 0 && ! confirm(
+                    'Switching the order type clears the current item list and everything entered '
+                    + 'against it — sizes, quantities, sponsor logos and embellishments. Continue?'
+                )) {
+                    this.typeRevertGuard = oldType;
+                    this.$wire.set('data.type', oldType);
+                    return;
+                }
+
+                this.resetItemSection();
+            });
+
+            // Switching Order Kind to/from Bulk or Forecast doesn't rebuild
+            // the columns, but it does change whether the flat item list is
+            // in use — re-group so goalkeeper-only items sit at the end.
+            this.$watch(() => this.$wire.data.order_kind, () => {
+                if (this.isPackageType()) this.groupGoalieItemsLast();
             });
 
             // Club Items orders: if the club changes, drop any columns whose
@@ -923,8 +815,37 @@ function orderGrid(config) {
 
         ensureAllCells() {
             this.rows.forEach(row => {
-                this.columns.forEach(col => this.ensureCell(row, col.key));
+                this.columnsFor(row.section || 'player').forEach(col => this.ensureCell(row, col.key));
             });
+        },
+
+        // Section-scoping: `columns` and `rows` stay single flat arrays
+        // (so totals/summary/sponsors below keep iterating everything and
+        // stay naturally combined) — these two just filter which of them
+        // belong in the Goalkeeper vs Player roster block. A column can be
+        // flagged as both and so appear in both blocks sharing one
+        // order_item; a row (a named person) only ever belongs to one.
+        columnsFor(section) {
+            return section === 'goalie'
+                ? this.columns.filter(c => c.is_goalie_item === true)
+                : this.columns.filter(c => c.is_player_item === true);
+        },
+
+        sectionRows(section) {
+            return section === 'goalie'
+                ? this.rows.filter(r => r.section === 'goalie')
+                : this.rows.filter(r => r.section !== 'goalie');
+        },
+
+        // Gates the whole Goalkeeper Items block — only ever true for a
+        // Package order whose selected package has at least one item
+        // flagged Goalkeeper Item.
+        hasGoalieItems() {
+            return this.columnsFor('goalie').length > 0;
+        },
+
+        sectionTotal(section) {
+            return this.sectionRows(section).reduce((sum, row) => sum + this.rowTotal(row), 0);
         },
 
         // Live feedback while typing: red-highlight the cell if the current
@@ -968,7 +889,9 @@ function orderGrid(config) {
         },
 
         addColumn() {
-            const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0, notes: '', has_club_crest: true, crest_number: 1 };
+            // Individual / Club Items columns are never goalkeeper-only —
+            // that classification only exists on package items.
+            const col = { key: this.newKey('tmp'), id: null, product_id: null, unit_price: 0, notes: '', has_club_crest: true, crest_number: 1, is_goalie_item: false, is_player_item: true, number_color: null };
             this.columns.push(col);
             this.ensureAllCells();
             this.sync();
@@ -1017,17 +940,36 @@ function orderGrid(config) {
             this.sync();
         },
 
-        addRow(shouldSync = true) {
-            const row = { key: this.newKey('tmp'), id: null, player_name: '', number: '', initials: '', notes: '', cells: {} };
-            this.columns.forEach(col => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
+        addRow(section = 'player', shouldSync = true) {
+            const row = { key: this.newKey('tmp'), id: null, player_name: '', number: '', initials: '', notes: '', section, cells: {} };
+            this.columnsFor(section).forEach(col => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
             this.rows.push(row);
             if (shouldSync) this.sync();
         },
 
-        addRows(count) {
+        // Guarantees a starter row per visible (non-bulk) section: the
+        // Player section always starts with one blank row (unchanged from
+        // before the Goalkeeper split existed), and the Goalkeeper Items
+        // section gets its own starter row the moment it becomes visible
+        // (initial load, switching to a package with goalkeeper items, or
+        // Resync Package Items) instead of opening empty. A starter row
+        // that's never actually filled in is dropped on save (see
+        // PersistsOrderGrid's blank-row skip), so calling this is always
+        // safe even if it ends up unused.
+        ensureDefaultRows() {
+            if (this.rows.length === 0) {
+                this.addRow('player', false);
+            }
+
+            if (!this.isBulkType() && this.hasGoalieItems() && this.sectionRows('goalie').length === 0) {
+                this.addRow('goalie', false);
+            }
+        },
+
+        addRows(section, count) {
             const n = Math.max(1, Math.min(500, parseInt(count) || 1));
             for (let i = 0; i < n; i++) {
-                this.addRow(false);
+                this.addRow(section, false);
             }
             this.sync();
         },
@@ -1077,6 +1019,8 @@ function orderGrid(config) {
             const source = this.rows.find(r => r.key === rowKey);
             if (!source) return;
 
+            const section = source.section || 'player';
+
             const copy = {
                 key: this.newKey('tmp'),
                 id: null,
@@ -1084,10 +1028,11 @@ function orderGrid(config) {
                 number: source.number,
                 initials: source.initials,
                 notes: source.notes,
+                section,
                 cells: {},
             };
 
-            this.columns.forEach(col => {
+            this.columnsFor(section).forEach(col => {
                 const src = source.cells[col.key];
                 copy.cells[col.key] = { size: src ? src.size : '', qty: src ? src.qty : 1, invalid: false };
             });
@@ -1112,11 +1057,17 @@ function orderGrid(config) {
                 notes: '',
                 has_club_crest: item.has_club_crest ?? true,
                 crest_number: item.crest_number ?? 1,
+                is_goalie_item: item.is_goalie_item ?? false,
+                is_player_item: item.is_player_item ?? true,
+                number_color: item.number_color ?? null,
             }));
 
+            // Each row only gets cells for its own section's columns — a
+            // goalkeeper row never carries phantom cells for player-only
+            // items, and vice versa.
             this.rows.forEach(row => {
                 row.cells = {};
-                this.columns.forEach(col => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
+                this.columnsFor(row.section || 'player').forEach(col => { row.cells[col.key] = { size: '', qty: 1, invalid: false }; });
             });
 
             this.sponsorRows = [];
@@ -1149,7 +1100,55 @@ function orderGrid(config) {
                 });
             });
 
+            // Sponsor/embellishment seeding above pairs pkg.items[index] with
+            // columns[index], so only reorder the columns once that's done.
+            this.groupGoalieItemsLast();
+
+            this.ensureDefaultRows();
             this.sync();
+        },
+
+        // Bulk Order / Forecast renders one flat item list with no separate
+        // Goalkeeper roster block, so push the goalkeeper-only items to the
+        // end instead of leaving them wherever the package's sort order put
+        // them. Items flagged as both Goalkeeper and Player stay inline with
+        // the rest. No-op for every other order kind. Reorders by object
+        // reference, so sponsor/embellishment rows (keyed by col.key) and
+        // per-row cell maps are unaffected.
+        groupGoalieItemsLast() {
+            if (!this.isBulkType()) return;
+
+            const goalieOnly = c => c.is_goalie_item === true && c.is_player_item !== true;
+            const head = this.columns.filter(c => !goalieOnly(c));
+            const tail = this.columns.filter(goalieOnly);
+
+            if (tail.length === 0) return;
+            if (tail.every((c, i) => this.columns[head.length + i] === c)) return;
+
+            this.columns = [...head, ...tail];
+            this.sync();
+        },
+
+        // Wipes the whole item section — columns, roster rows, and the
+        // per-item Sponsor Logos / Embellishments — then rebuilds the
+        // starting layout for whatever order Type is now selected: package
+        // items for a Package order with a package chosen, otherwise a
+        // single blank starter row. Used when the Type changes, where the
+        // old type's columns make no sense against the new one.
+        resetItemSection() {
+            this.columns = [];
+            this.sponsorRows = [];
+            this.embellishmentRows = [];
+            this.changedCellKeys = new Set();
+            this.rows = [];
+
+            if (this.isPackageType() && this.$wire.data.package_id) {
+                this.loadPackageItems();
+            } else {
+                this.ensureDefaultRows();
+                this.ensureAllCells();
+                this.sync();
+            }
         },
 
         addSponsorRow() {
@@ -1283,16 +1282,29 @@ function orderGrid(config) {
             return this.rows.reduce((sum, row) => sum + this.rowTotal(row), 0);
         },
 
-        // Item × size summary table — every distinct size actually entered
-        // anywhere in the roster, as columns, against each item as rows.
+        // Item × size summary table — every size any item in the order
+        // actually offers (not just the ones someone has picked so far),
+        // as columns, against each item as rows. Sorted against sizeOrder
+        // (every size name in Attribute position order, same source
+        // OrderExport's own $sizeOrder uses) rather than merging each
+        // column's own already-correctly-ordered size list one column at a
+        // time — that merge only comes out right when every item shares an
+        // identical size set; with different subsets per item it can
+        // produce a wrong order (e.g. S, M, L, XS instead of XS, S, M, L).
         summarySizes() {
-            const sizes = new Set();
-            this.rows.forEach(row => {
-                Object.values(row.cells || {}).forEach(cell => {
-                    if (cell && cell.size) sizes.add(cell.size);
-                });
+            const present = new Set();
+            this.columns.forEach(col => {
+                this.productSizes(col).forEach(size => present.add(size));
             });
-            return Array.from(sizes).sort();
+
+            const ordered = this.sizeOrder.filter(size => present.has(size));
+            // Defensive: a size present on a product but somehow missing
+            // from sizeOrder (shouldn't happen — sizeOrder is every
+            // Attribute there is) still shows up, just appended at the end
+            // rather than silently dropped.
+            const unordered = Array.from(present).filter(size => ! this.sizeOrder.includes(size));
+
+            return [...ordered, ...unordered];
         },
 
         summaryCount(col, size) {
@@ -1317,8 +1329,11 @@ function orderGrid(config) {
             return this.columns.reduce((total, col) => total + this.summaryItemTotal(col), 0);
         },
 
-        allColKeys() {
-            return ['player_name', 'number', 'initials', ...this.columns.map(c => c.key), 'notes'];
+        // Column order used for a horizontal paste block — scoped to one
+        // section's own columns, since the Goalkeeper and Player blocks
+        // are separate tables with separate row indexes.
+        allColKeysFor(section) {
+            return ['player_name', 'initials', 'number', ...this.columnsFor(section).map(c => c.key), 'notes'];
         },
 
         // Excel-style vertical navigation: Enter/ArrowDown move to the same
@@ -1327,9 +1342,13 @@ function orderGrid(config) {
         // action), but plain ArrowDown never creates rows on its own —
         // it's pure navigation, same as ArrowUp. Left/right movement is
         // left to the browser's native Tab/Shift+Tab and text-cursor
-        // behavior.
+        // behavior. Every cell also carries a data-section attribute (see
+        // order-grid-roster.blade.php) so this never jumps between the
+        // Goalkeeper and Player blocks even though both re-use row indexes
+        // starting at 0.
         navigate(event, direction, allowAutoAddRow = false) {
             const el = event.target;
+            const section = el.dataset.section || 'player';
             const row = parseInt(el.dataset.row);
             const col = el.dataset.col;
             const targetRow = direction === 'down' ? row + 1 : row - 1;
@@ -1338,11 +1357,11 @@ function orderGrid(config) {
                 return;
             }
 
-            if (targetRow >= this.rows.length) {
+            if (targetRow >= this.sectionRows(section).length) {
                 if (!allowAutoAddRow) {
                     return;
                 }
-                this.addRow();
+                this.addRow(section);
             }
 
             this.$nextTick(() => {
@@ -1358,15 +1377,16 @@ function orderGrid(config) {
                 // starting with a digit. Comparing .dataset directly
                 // sidesteps both problems.
                 const next = Array.from(document.querySelectorAll('[data-row]'))
-                    .find(node => node.dataset.row === String(targetRow) && node.dataset.col === String(col));
+                    .find(node => node.dataset.row === String(targetRow) && node.dataset.col === String(col) && (node.dataset.section || 'player') === section);
                 if (!next) return;
                 next.focus();
                 if (typeof next.select === 'function') next.select();
             });
         },
 
-        setCellValue(rowIndex, colKey, value) {
-            const row = this.rows[rowIndex];
+        // Takes the row object directly (not an index) — with two sections
+        // sharing row-index numbering, an index alone is ambiguous.
+        setCellValue(row, colKey, value) {
             if (!row) return;
 
             if (['player_name', 'initials'].includes(colKey)) {
@@ -1403,14 +1423,16 @@ function orderGrid(config) {
 
             event.preventDefault();
 
-            const colOrder = this.allColKeys();
+            const section = event.target.dataset.section || 'player';
+            const colOrder = this.allColKeysFor(section);
             const startColIndex = colOrder.indexOf(colKey);
             const lines = text.replace(/\r/g, '').split('\n').filter((line, i, arr) => !(i === arr.length - 1 && line === ''));
 
             lines.forEach((line, rOffset) => {
                 const values = line.split('\t');
-                let targetRow = rowIndex + rOffset;
-                while (targetRow >= this.rows.length) this.addRow();
+                const targetIndex = rowIndex + rOffset;
+                while (this.sectionRows(section).length <= targetIndex) this.addRow(section, false);
+                const targetRow = this.sectionRows(section)[targetIndex];
 
                 values.forEach((value, cOffset) => {
                     const targetColKey = colOrder[startColIndex + cOffset];
@@ -1452,6 +1474,9 @@ function orderGrid(config) {
                     unit_price: c.unit_price,
                     has_club_crest: c.has_club_crest,
                     crest_number: c.crest_number,
+                    is_goalie_item: c.is_goalie_item,
+                    is_player_item: c.is_player_item,
+                    number_color: c.number_color ?? null,
                 }));
 
                 const rows = (data.rows || []).map(r => {
@@ -1462,7 +1487,7 @@ function orderGrid(config) {
                     });
                     return {
                         player_name: r.player_name, number: r.number,
-                        initials: r.initials, notes: r.notes, cells,
+                        initials: r.initials, notes: r.notes, section: r.section, cells,
                     };
                 });
 

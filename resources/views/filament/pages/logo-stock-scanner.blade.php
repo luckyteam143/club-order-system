@@ -147,7 +147,7 @@
 
                 {{-- Stock Type filter — display-only, doesn't affect what's loaded or what "Update" commits. --}}
                 <div class="mt-2 flex gap-1.5">
-                    <template x-for="option in [{ key: 'all', label: 'All' }, { key: 'logo', label: 'Logo' }, { key: 'numbers', label: 'Numbers' }]" :key="option.key">
+                    <template x-for="option in [{ key: 'all', label: 'All' }, { key: 'logo', label: 'Logo' }, { key: 'numbers', label: 'Numbers' }, { key: 'sponsor', label: 'Sponsor' }]" :key="option.key">
                         <button
                             type="button"
                             @click="stockTypeFilter = option.key"
@@ -168,8 +168,8 @@
                                     x-text="row.logo_type ?? row.logo_name"></p>
                                 <p class="truncate text-xs text-gray-500 dark:text-gray-400">
                                     <span x-text="row.logo_name"></span>
-                                    <span x-text="' · ' + (row.stock_type === 'numbers' ? 'Numbers' : 'Logo')"></span>
-                                    <span x-show="row.size" x-text="' · Size: ' + row.size"></span>
+                                    <span x-text="' · ' + (row.stock_type === 'numbers' ? 'Numbers' : (row.stock_type === 'sponsor' ? 'Sponsor' : 'Logo'))"></span>
+                                    <span x-show="row.width || row.height" x-text="' · Size: ' + [row.width, row.height].filter(Boolean).join(' × ')"></span>
                                     <span x-show="row.location" x-text="' · Box: ' + row.location"></span>
                                 </p>
                                 <p class="text-[11px] font-semibold tabular-nums text-gray-400 dark:text-gray-500">

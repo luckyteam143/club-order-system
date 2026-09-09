@@ -4,6 +4,7 @@ namespace App\Filament\Resources\PackageResource\Pages;
 
 use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\PackageResource\Concerns\PersistsPackageItems;
+use App\Imports\PackageEmbellishmentsImport;
 use App\Imports\PackageItemsImport;
 use Filament\Actions;
 use Filament\Forms;
@@ -62,7 +63,7 @@ class EditPackage extends EditRecord
                             'text/csv',
                         ])
                         ->required()
-                        ->helperText('Columns: ID, Barcode, Name, Qty, Price Override, Has Club Crest (Yes/No), Crest Number. A row with an ID updates that item\'s Qty, Price Override and crest settings (its sponsor / embellishment settings are kept). A row with no ID is added as a new item, matched to a product by Barcode — the same product may be added on several rows. Items not listed are left unchanged; nothing is deleted by an import. Use "Export Items" for the template.'),
+                        ->helperText('Columns: ID, Barcode, Name, Qty, Price Override, Has Club Crest (Yes/No), Crest Number, Goalkeeper Item, Player Item, Number Colour. A row with an ID updates that item\'s Qty, Price Override, crest, goalkeeper/player and number-colour settings (its sponsor / embellishment settings are kept). A row with no ID is added as a new item, matched to a product by Barcode — the same product may be added on several rows. Items not listed are left unchanged; nothing is deleted by an import. Use "Export Items" for the template.'),
                 ])
                 ->action(function (array $data) {
                     $path = Storage::disk('local')->path($data['file']);
@@ -87,11 +88,11 @@ class EditPackage extends EditRecord
 
                     Storage::disk('local')->delete($data['file']);
 
-                    $body = $import->imported . ' item row(s) imported.';
+                    $body = $import->imported.' item row(s) imported.';
 
                     if ($import->errors) {
-                        $body .= ' ' . count($import->errors) . ' issue(s): '
-                            . implode(' ', array_slice($import->errors, 0, 10));
+                        $body .= ' '.count($import->errors).' issue(s): '
+                            .implode(' ', array_slice($import->errors, 0, 10));
                     }
 
                     Notification::make()
@@ -101,6 +102,68 @@ class EditPackage extends EditRecord
                         ->send();
 
                     // Reload so the Items repeater rebuilds from the pivot.
+                    $this->redirect(PackageResource::getUrl('edit', ['record' => $this->record]));
+                }),
+            Actions\Action::make('exportEmbellishments')
+                ->label('Export Embellishments')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->url(fn () => route('packages.embellishments.export', $this->record))
+                ->openUrlInNewTab(),
+            Actions\Action::make('importEmbellishments')
+                ->label('Import Embellishments')
+                ->icon('heroicon-o-arrow-up-tray')
+                ->color('gray')
+                ->form([
+                    Forms\Components\FileUpload::make('file')
+                        ->label('Excel / CSV File')
+                        ->disk('local')
+                        ->directory('imports/package-embellishments')
+                        ->acceptedFileTypes([
+                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            'application/vnd.ms-excel',
+                            'text/csv',
+                        ])
+                        ->required()
+                        ->helperText('Columns: ID, Item Barcode, Item Name, Embellishment, Position, Override Price. A row with an ID updates that embellishment row. A row with no ID is added to the package item matched by Item Barcode. Embellishment and Position match by name. Rows not listed are left unchanged; nothing is deleted by an import. Use "Export Embellishments" for the template.'),
+                ])
+                ->action(function (array $data) {
+                    $path = Storage::disk('local')->path($data['file']);
+
+                    set_time_limit(300);
+                    ini_set('memory_limit', '512M');
+
+                    try {
+                        $import = new PackageEmbellishmentsImport($this->record);
+                        Excel::import($import, $path);
+                    } catch (\Throwable $e) {
+                        Storage::disk('local')->delete($data['file']);
+
+                        Notification::make()
+                            ->title('Import failed')
+                            ->body($e->getMessage())
+                            ->danger()
+                            ->send();
+
+                        return;
+                    }
+
+                    Storage::disk('local')->delete($data['file']);
+
+                    $body = $import->imported.' embellishment row(s) imported.';
+
+                    if ($import->errors) {
+                        $body .= ' '.count($import->errors).' issue(s): '
+                            .implode(' ', array_slice($import->errors, 0, 10));
+                    }
+
+                    Notification::make()
+                        ->title('Package embellishments imported')
+                        ->body($body)
+                        ->{$import->errors ? 'warning' : 'success'}()
+                        ->send();
+
+                    // Reload so the Embellishments repeater rebuilds from the pivot.
                     $this->redirect(PackageResource::getUrl('edit', ['record' => $this->record]));
                 }),
             Actions\DeleteAction::make(),

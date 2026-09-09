@@ -6,6 +6,7 @@ use App\Filament\Resources\LogoStockResource\Pages;
 use App\Models\Club;
 use App\Models\LogoStock;
 use App\Models\SponsorLogo;
+use App\Support\MediaPicker;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Get;
@@ -78,15 +79,18 @@ class LogoStockResource extends Resource
                 ->required(),
             Forms\Components\Select::make('logo_stock_type')
                 ->label('Stock Type')
-                ->options(['logo' => 'Logo', 'numbers' => 'Numbers'])
+                ->options(['logo' => 'Logo', 'numbers' => 'Numbers', 'sponsor' => 'Sponsor'])
                 ->required()
                 ->default('logo'),
             Forms\Components\TextInput::make('logo_name')
                 ->label('Logo Name')
                 ->required()
                 ->maxLength(255),
-            Forms\Components\TextInput::make('size')
-                ->label('Logo Size')
+            Forms\Components\TextInput::make('width')
+                ->label('Width')
+                ->maxLength(255),
+            Forms\Components\TextInput::make('height')
+                ->label('Height')
                 ->maxLength(255),
             Forms\Components\TextInput::make('location')
                 ->label('Location (Box Number)')
@@ -128,6 +132,8 @@ class LogoStockResource extends Resource
                         $set('image', [(string) Str::uuid() => $logo]);
                     }
                 }),
+            MediaPicker::make('image', 'Or Use an Image from the Media Library')
+                ->helperText('Reuse an image already uploaded in the Media module — fills the Image field below.'),
             Forms\Components\FileUpload::make('image')
                 ->label('Image')
                 ->directory('logo-stock')
@@ -139,6 +145,10 @@ class LogoStockResource extends Resource
                 ->url()
                 ->maxLength(255)
                 ->helperText('Link to the vector source file (e.g. shared drive URL).'),
+            Forms\Components\Textarea::make('notes')
+                ->label('Notes')
+                ->rows(3)
+                ->columnSpanFull(),
         ])->columns(2);
     }
 
@@ -155,11 +165,17 @@ class LogoStockResource extends Resource
                     ->badge()
                     ->formatStateUsing(fn (string $state) => match ($state) {
                         'numbers' => 'Numbers',
+                        'sponsor' => 'Sponsor',
                         default   => 'Logo',
                     })
-                    ->color(fn (string $state) => $state === 'numbers' ? 'warning' : 'success'),
+                    ->color(fn (string $state) => match ($state) {
+                        'numbers' => 'warning',
+                        'sponsor' => 'info',
+                        default   => 'success',
+                    }),
                 Tables\Columns\TextColumn::make('logo_name')->label('Logo Name')->searchable(),
-                Tables\Columns\TextColumn::make('size')->label('Size')->toggleable(),
+                Tables\Columns\TextColumn::make('width')->label('Width')->toggleable(),
+                Tables\Columns\TextColumn::make('height')->label('Height')->toggleable(),
                 Tables\Columns\TextColumn::make('location')->label('Location')->toggleable(),
                 Tables\Columns\TextColumn::make('warehouse.name')->label('Warehouse')->sortable(),
                 Tables\Columns\TextColumn::make('qty')->label('Qty')->numeric()->sortable()->alignRight()
@@ -169,13 +185,14 @@ class LogoStockResource extends Resource
                         default            => 'success',
                     }),
                 Tables\Columns\TextColumn::make('position')->label('Position')->sortable()->toggleable(),
+                Tables\Columns\TextColumn::make('notes')->label('Notes')->limit(40)->wrap()->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('updated_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('club')->relationship('club', 'name')->searchable(),
                 Tables\Filters\SelectFilter::make('warehouse')->relationship('warehouse', 'name'),
                 Tables\Filters\SelectFilter::make('logoType')->relationship('logoType', 'name')->label('Logo Type'),
-                Tables\Filters\SelectFilter::make('logo_stock_type')->label('Stock Type')->options(['logo' => 'Logo', 'numbers' => 'Numbers']),
+                Tables\Filters\SelectFilter::make('logo_stock_type')->label('Stock Type')->options(['logo' => 'Logo', 'numbers' => 'Numbers', 'sponsor' => 'Sponsor']),
             ])
             ->actions([Tables\Actions\EditAction::make()])
             ->bulkActions([Tables\Actions\BulkActionGroup::make([Tables\Actions\DeleteBulkAction::make()])])

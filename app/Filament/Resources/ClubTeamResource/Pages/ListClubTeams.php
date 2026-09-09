@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ClubTeamResource\Pages;
 
+use App\Filament\Concerns\HasFullWidthContent;
 use App\Filament\Resources\ClubTeamResource;
 use App\Imports\ClubTeamImport;
 use Filament\Actions;
@@ -13,6 +14,8 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class ListClubTeams extends ListRecords
 {
+    use HasFullWidthContent;
+
     protected static string $resource = ClubTeamResource::class;
 
     protected function getHeaderActions(): array
@@ -46,7 +49,7 @@ class ListClubTeams extends ListRecords
                     ini_set('memory_limit', '512M');
 
                     try {
-                        $import = new ClubTeamImport();
+                        $import = new ClubTeamImport;
                         Excel::import($import, $path);
                     } catch (\Throwable $e) {
                         Storage::disk('local')->delete($data['file']);

@@ -72,7 +72,7 @@ class StockScanner extends Page
      * the SAME item again (the one already loaded) is what actually
      * applies the add/remove.
      */
-    public function scanBarcode(string $barcode, int $warehouseId, ?int $currentProductId, int $delta): ?array
+    public function scanBarcode(string $barcode, int $warehouseId, ?int $currentProductId, int $delta, string $holdMode = 'none'): ?array
     {
         $barcode = trim($barcode);
 
@@ -90,44 +90,77 @@ class StockScanner extends Page
             return [...$this->productPayload($product, $warehouseId), 'adjusted' => false];
         }
 
-        return DB::transaction(function () use ($product, $delta, $warehouseId) {
-            $currentQty = ProductWarehouseStock::where('product_id', $product->id)
-                ->where('warehouse_id', $warehouseId)
-                ->value('qty') ?? 0;
-
-            ProductWarehouseStock::applyQty($product->id, $warehouseId, $currentQty + $delta);
-            $product->recalculateStock();
-
-            return [...$this->productPayload($product, $warehouseId), 'adjusted' => true];
-        });
+        return [
+            ...$this->applyMovement($product, $warehouseId, $delta, $this->normalizeHoldMode($holdMode)),
+            'adjusted' => true,
+        ];
     }
 
     /**
      * Relative adjustment — one scan (or tap of +/-) in Add/Remove mode.
      * Clamped at 0, never goes negative.
      */
-    public function adjustStock(int $productId, int $delta, int $warehouseId): ?array
+    public function adjustStock(int $productId, int $delta, int $warehouseId, string $holdMode = 'none'): ?array
     {
         if (! $this->validWarehouseId($warehouseId)) {
             return null;
         }
 
-        return DB::transaction(function () use ($productId, $delta, $warehouseId) {
-            $product = Product::find($productId);
+        $product = Product::find($productId);
 
-            if (! $product) {
-                return null;
-            }
+        if (! $product) {
+            return null;
+        }
 
-            $currentQty = ProductWarehouseStock::where('product_id', $productId)
+        return $this->applyMovement($product, $warehouseId, $delta, $this->normalizeHoldMode($holdMode));
+    }
+
+    /**
+     * The single commit path shared by scanBarcode() and adjustStock(),
+     * branching on the scanner's on-hold mode:
+     *
+     *  - 'none'   : normal — $delta adjusts available stock (qty).
+     *  - 'put'    : only a removal does anything — whatever is actually
+     *               taken out of available stock is parked in qty_on_hold
+     *               instead of discarded. A positive $delta falls through to
+     *               normal "add to stock" behaviour.
+     *  - 'update' : $delta adjusts qty_on_hold directly; available stock
+     *               (qty) is never touched.
+     *
+     * @return array{id: int, name: string, barcode: ?string, size: ?string, qty: int, qty_on_hold: int}
+     */
+    private function applyMovement(Product $product, int $warehouseId, int $delta, string $holdMode): array
+    {
+        return DB::transaction(function () use ($product, $warehouseId, $delta, $holdMode) {
+            $current = ProductWarehouseStock::where('product_id', $product->id)
                 ->where('warehouse_id', $warehouseId)
-                ->value('qty') ?? 0;
+                ->first(['qty', 'qty_on_hold']);
 
-            ProductWarehouseStock::applyQty($productId, $warehouseId, $currentQty + $delta);
-            $product->recalculateStock();
+            if ($holdMode === 'update') {
+                ProductWarehouseStock::applyOnHoldQty(
+                    $product->id,
+                    $warehouseId,
+                    (int) ($current->qty_on_hold ?? 0) + $delta,
+                );
+            } elseif ($holdMode === 'put' && $delta < 0) {
+                ProductWarehouseStock::moveToHold($product->id, $warehouseId, -$delta);
+                $product->recalculateStock();
+            } else {
+                ProductWarehouseStock::applyQty(
+                    $product->id,
+                    $warehouseId,
+                    (int) ($current->qty ?? 0) + $delta,
+                );
+                $product->recalculateStock();
+            }
 
             return $this->productPayload($product, $warehouseId);
         });
+    }
+
+    private function normalizeHoldMode(string $holdMode): string
+    {
+        return in_array($holdMode, ['put', 'update'], true) ? $holdMode : 'none';
     }
 
     /**
@@ -148,16 +181,17 @@ class StockScanner extends Page
 
     private function productPayload(Product $product, int $warehouseId): array
     {
-        $qty = ProductWarehouseStock::where('product_id', $product->id)
+        $stock = ProductWarehouseStock::where('product_id', $product->id)
             ->where('warehouse_id', $warehouseId)
-            ->value('qty') ?? 0;
+            ->first(['qty', 'qty_on_hold']);
 
         return [
-            'id'      => $product->id,
-            'name'    => $product->name,
-            'barcode' => $product->barcode,
-            'size'    => $product->size,
-            'qty'     => (int) $qty,
+            'id'          => $product->id,
+            'name'        => $product->name,
+            'barcode'     => $product->barcode,
+            'size'        => $product->size,
+            'qty'         => (int) ($stock->qty ?? 0),
+            'qty_on_hold' => (int) ($stock->qty_on_hold ?? 0),
         ];
     }
 }

@@ -71,6 +71,7 @@ class ViewOrder extends ViewRecord
                         TextEntry::make('shipping_address')->label('Shipping Address')->placeholder('—'),
                         TextEntry::make('phone')->label('Phone')->placeholder('—'),
                         TextEntry::make('email')->label('Email')->placeholder('—'),
+                        TextEntry::make('required_by_date')->label('Required By Date')->date()->placeholder('—'),
                         TextEntry::make('notes')->label('Order Notes')->placeholder('—')->columnSpanFull(),
                     ]),
                 // Office-use fields — same audience as the editable form's

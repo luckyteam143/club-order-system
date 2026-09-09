@@ -50,6 +50,7 @@ class AdminPanelProvider extends PanelProvider
                 'Administration',
                 'Orders',
                 'Catalogue',
+                'Media',
                 'Macron Catalog',
             ])
             ->middleware([

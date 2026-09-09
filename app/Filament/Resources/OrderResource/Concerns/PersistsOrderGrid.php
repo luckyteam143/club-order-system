@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\OrderItemCell;
 use App\Models\OrderItemEmbellishment;
 use App\Models\OrderItemSponsor;
+use App\Models\PackageProduct;
 use App\Models\Product;
 use App\Models\SponsorLogo;
 use Illuminate\Support\Facades\DB;
@@ -31,32 +32,35 @@ trait PersistsOrderGrid
         ]);
 
         $columns = $order->orderItems->map(fn (OrderItem $item) => [
-            'key'            => 'i'.$item->id,
-            'id'             => $item->id,
-            'product_id'     => $item->product_id,
-            'unit_price'     => (float) $item->unit_price,
-            'notes'          => $item->notes,
+            'key' => 'i'.$item->id,
+            'id' => $item->id,
+            'product_id' => $item->product_id,
+            'unit_price' => (float) $item->unit_price,
+            'notes' => $item->notes,
             'has_club_crest' => (bool) $item->has_club_crest,
-            'crest_number'   => (int) ($item->crest_number ?? 1),
+            'crest_number' => (int) ($item->crest_number ?? 1),
+            'is_goalie_item' => (bool) $item->is_goalie_item,
+            'is_player_item' => (bool) $item->is_player_item,
+            'number_color' => $item->number_color,
         ])->values()->all();
 
         $sponsors = $order->orderItems->flatMap(fn (OrderItem $item) => $item->sponsors->map(fn ($sponsor) => [
-            'key'                       => 'sp'.$sponsor->id,
-            'id'                        => $sponsor->id,
-            'item_key'                  => 'i'.$item->id,
-            'sponsor_logo_id'           => $sponsor->sponsor_logo_id,
+            'key' => 'sp'.$sponsor->id,
+            'id' => $sponsor->id,
+            'item_key' => 'i'.$item->id,
+            'sponsor_logo_id' => $sponsor->sponsor_logo_id,
             'embellishment_position_id' => $sponsor->embellishment_position_id,
-            'brochure_link'             => $sponsor->brochure_link,
-            'override_price'            => $sponsor->override_price,
+            'brochure_link' => $sponsor->brochure_link,
+            'override_price' => $sponsor->override_price,
         ]))->values()->all();
 
         $embellishments = $order->orderItems->flatMap(fn (OrderItem $item) => $item->embellishments->map(fn ($e) => [
-            'key'                       => 'em'.$e->id,
-            'id'                        => $e->id,
-            'item_key'                  => 'i'.$item->id,
-            'embellishment_id'          => $e->embellishment_id,
+            'key' => 'em'.$e->id,
+            'id' => $e->id,
+            'item_key' => 'i'.$item->id,
+            'embellishment_id' => $e->embellishment_id,
             'embellishment_position_id' => $e->embellishment_position_id,
-            'override_price'            => $e->override_price,
+            'override_price' => $e->override_price,
         ]))->values()->all();
 
         $isBulk = in_array($order->order_kind, ['bulk', 'forecast'], true);
@@ -77,21 +81,22 @@ trait PersistsOrderGrid
             }
 
             return [
-                'key'         => 'p'.$row->id,
-                'id'          => $row->id,
+                'key' => 'p'.$row->id,
+                'id' => $row->id,
                 'player_name' => $row->player_name,
-                'number'      => $row->number,
-                'initials'    => $row->initials,
-                'notes'       => $row->notes,
-                'cells'       => $cells,
+                'number' => $row->number,
+                'initials' => $row->initials,
+                'notes' => $row->notes,
+                'section' => $row->section ?? 'player',
+                'cells' => $cells,
             ];
         })->values()->all();
 
         return [
-            'columns'          => $columns,
-            'rows'             => $rows,
-            'sponsors'         => $sponsors,
-            'embellishments'   => $embellishments,
+            'columns' => $columns,
+            'rows' => $rows,
+            'sponsors' => $sponsors,
+            'embellishments' => $embellishments,
             'lastChangedCells' => $order->last_changed_cells ?? [],
         ];
     }
@@ -105,6 +110,7 @@ trait PersistsOrderGrid
             $embellishments = collect($state['embellishments'] ?? []);
 
             $columnKeyToId = [];
+            $columnKeyToProductId = [];
             $keptItemIds = [];
 
             foreach ($columns as $sort => $col) {
@@ -115,12 +121,15 @@ trait PersistsOrderGrid
                 $hasCrest = (bool) ($col['has_club_crest'] ?? true);
 
                 $attrs = [
-                    'order_id'       => $order->id,
-                    'product_id'     => $col['product_id'],
-                    'sort_order'     => $sort,
-                    'notes'          => blank($col['notes'] ?? null) ? null : $col['notes'],
+                    'order_id' => $order->id,
+                    'product_id' => $col['product_id'],
+                    'sort_order' => $sort,
+                    'notes' => blank($col['notes'] ?? null) ? null : $col['notes'],
                     'has_club_crest' => $hasCrest,
-                    'crest_number'   => $hasCrest ? max(1, (int) ($col['crest_number'] ?? 1)) : 1,
+                    'crest_number' => $hasCrest ? max(1, (int) ($col['crest_number'] ?? 1)) : 1,
+                    'is_goalie_item' => (bool) ($col['is_goalie_item'] ?? false),
+                    'is_player_item' => (bool) ($col['is_player_item'] ?? true),
+                    'number_color' => blank($col['number_color'] ?? null) ? null : trim((string) $col['number_color']),
                 ];
 
                 $id = $col['id'] ?? null;
@@ -144,6 +153,7 @@ trait PersistsOrderGrid
                 }
 
                 $columnKeyToId[$col['key']] = $id;
+                $columnKeyToProductId[$col['key']] = (int) $col['product_id'];
                 $keptItemIds[] = $id;
             }
 
@@ -167,20 +177,32 @@ trait PersistsOrderGrid
 
                 $positionId = $this->resolvePositionId($sponsor['embellishment_position_id'] ?? null);
 
-                // A club user's submitted override is ignored — either the
-                // existing override (if this sponsor row already had one)
-                // or none survives, never wiping out a price an admin set.
+                // A club user's submitted override is ignored: for an
+                // existing sponsor row keep whatever override it already
+                // had, and for a brand new one fall back to the override
+                // this order's package defines for it (so a package's
+                // predefined sponsor pricing still reaches the order) —
+                // never a value the client made up.
                 $overridePrice = $this->canEditOrderPricing()
                     ? $this->resolveOverridePrice($sponsor['override_price'] ?? null)
-                    : (($sponsor['id'] ?? null) ? OrderItemSponsor::find($sponsor['id'])?->override_price : null);
+                    : (($sponsor['id'] ?? null)
+                        ? OrderItemSponsor::find($sponsor['id'])?->override_price
+                        : $this->resolvePackageAddOnOverride(
+                            $order,
+                            $columnKeyToProductId[$sponsor['item_key'] ?? null] ?? null,
+                            'sponsors',
+                            'sponsor_logo_id',
+                            (int) $sponsorLogoId,
+                            $positionId,
+                        ));
 
                 $attrs = [
-                    'order_item_id'              => $itemId,
-                    'sponsor_logo_id'            => $sponsorLogoId,
-                    'embellishment_position_id'  => $positionId,
-                    'brochure_link'              => blank($sponsor['brochure_link'] ?? null) ? null : $sponsor['brochure_link'],
-                    'override_price'             => $overridePrice,
-                    'price'                      => $overridePrice ?? (float) $logo->price,
+                    'order_item_id' => $itemId,
+                    'sponsor_logo_id' => $sponsorLogoId,
+                    'embellishment_position_id' => $positionId,
+                    'brochure_link' => blank($sponsor['brochure_link'] ?? null) ? null : $sponsor['brochure_link'],
+                    'override_price' => $overridePrice,
+                    'price' => $overridePrice ?? (float) $logo->price,
                 ];
 
                 $id = $sponsor['id'] ?? null;
@@ -216,14 +238,23 @@ trait PersistsOrderGrid
                 // See the matching comment in the sponsors loop above.
                 $overridePrice = $this->canEditOrderPricing()
                     ? $this->resolveOverridePrice($embellishment['override_price'] ?? null)
-                    : (($embellishment['id'] ?? null) ? OrderItemEmbellishment::find($embellishment['id'])?->override_price : null);
+                    : (($embellishment['id'] ?? null)
+                        ? OrderItemEmbellishment::find($embellishment['id'])?->override_price
+                        : $this->resolvePackageAddOnOverride(
+                            $order,
+                            $columnKeyToProductId[$embellishment['item_key'] ?? null] ?? null,
+                            'embellishments',
+                            'embellishment_id',
+                            (int) $embellishmentId,
+                            $positionId,
+                        ));
 
                 $attrs = [
-                    'order_item_id'              => $itemId,
-                    'embellishment_id'           => $embellishmentId,
-                    'embellishment_position_id'  => $positionId,
-                    'override_price'             => $overridePrice,
-                    'price'                      => $overridePrice ?? (float) $catalogEmbellishment->cost,
+                    'order_item_id' => $itemId,
+                    'embellishment_id' => $embellishmentId,
+                    'embellishment_position_id' => $positionId,
+                    'override_price' => $overridePrice,
+                    'price' => $overridePrice ?? (float) $catalogEmbellishment->cost,
                 ];
 
                 $id = $embellishment['id'] ?? null;
@@ -263,12 +294,13 @@ trait PersistsOrderGrid
                 }
 
                 $attrs = [
-                    'order_id'     => $order->id,
+                    'order_id' => $order->id,
                     'player_index' => $index,
-                    'player_name'  => $row['player_name'] ?? null,
-                    'number'       => $row['number'] ?? null,
-                    'initials'     => $row['initials'] ?? null,
-                    'notes'        => $row['notes'] ?? null,
+                    'player_name' => $row['player_name'] ?? null,
+                    'number' => $row['number'] ?? null,
+                    'initials' => $row['initials'] ?? null,
+                    'notes' => $row['notes'] ?? null,
+                    'section' => ($row['section'] ?? 'player') === 'goalie' ? 'goalie' : 'player',
                 ];
 
                 $id = $row['id'] ?? null;
@@ -296,11 +328,11 @@ trait PersistsOrderGrid
                     $qty = max(1, (int) ($cell['qty'] ?? 1));
 
                     OrderItemCell::create([
-                        'order_item_id'        => $item->id,
-                        'order_player_row_id'  => $id,
-                        'size'                 => $cell['size'],
-                        'qty'                  => $qty,
-                        'line_total'           => $item->unitCost() * $qty,
+                        'order_item_id' => $item->id,
+                        'order_player_row_id' => $id,
+                        'size' => $cell['size'],
+                        'qty' => $qty,
+                        'line_total' => $item->unitCost() * $qty,
                     ]);
                 }
             }
@@ -323,12 +355,12 @@ trait PersistsOrderGrid
     private function persistBulkCells(Order $order, array $rowState, array $columnKeyToId, $items): void
     {
         $attrs = [
-            'order_id'     => $order->id,
+            'order_id' => $order->id,
             'player_index' => 0,
-            'player_name'  => null,
-            'number'       => null,
-            'initials'     => null,
-            'notes'        => null,
+            'player_name' => null,
+            'number' => null,
+            'initials' => null,
+            'notes' => null,
         ];
 
         $id = $rowState['id'] ?? null;
@@ -362,11 +394,11 @@ trait PersistsOrderGrid
                 }
 
                 OrderItemCell::create([
-                    'order_item_id'        => $item->id,
-                    'order_player_row_id'  => $id,
-                    'size'                 => $size,
-                    'qty'                  => $qty,
-                    'line_total'           => $item->unitCost() * $qty,
+                    'order_item_id' => $item->id,
+                    'order_player_row_id' => $id,
+                    'size' => $size,
+                    'qty' => $qty,
+                    'line_total' => $item->unitCost() * $qty,
                 ]);
             }
         }
@@ -415,6 +447,46 @@ trait PersistsOrderGrid
         }
 
         return (float) (Product::find($productId)?->retail_price ?? 0);
+    }
+
+    /**
+     * The override price this order's package predefines for a sponsor
+     * logo / embellishment on one of its items — used when the submitting
+     * user can't set prices themselves and the add-on row is brand new
+     * (seeded from the package), so a package's predefined add-on pricing
+     * still reaches the order instead of silently reverting to catalog.
+     * Null for non-package orders, an unknown item, or no override set.
+     *
+     * @param  'sponsors'|'embellishments'  $relation
+     * @param  'sponsor_logo_id'|'embellishment_id'  $matchColumn
+     */
+    private function resolvePackageAddOnOverride(Order $order, ?int $productId, string $relation, string $matchColumn, int $matchId, ?int $positionId): ?float
+    {
+        if ($order->type !== 'package' || ! $order->package_id || ! $productId || $matchId <= 0) {
+            return null;
+        }
+
+        $packageProduct = PackageProduct::query()
+            ->where('package_id', $order->package_id)
+            ->where('product_id', $productId)
+            // The same product can be in a package more than once; its
+            // add-ons live on the last row (see PersistsPackageItems).
+            ->orderByDesc('sort_order')
+            ->first();
+
+        if (! $packageProduct) {
+            return null;
+        }
+
+        $match = $packageProduct->{$relation}()
+            ->where($matchColumn, $matchId)
+            ->where('embellishment_position_id', $positionId)
+            ->first()
+            ?? $packageProduct->{$relation}()
+                ->where($matchColumn, $matchId)
+                ->first();
+
+        return $match?->override_price === null ? null : (float) $match->override_price;
     }
 
     /**

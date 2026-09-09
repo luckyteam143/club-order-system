@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\SponsorLogoResource\Pages;
 use App\Models\SponsorLogo;
+use App\Support\MediaPicker;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -46,6 +47,7 @@ class SponsorLogoResource extends Resource
                     'mimes' => 'Only PNG or JPG files are allowed.',
                     'max'   => 'The file must not be larger than 100KB.',
                 ]),
+            MediaPicker::make('file', 'Or choose the logo from the Media library'),
             Forms\Components\FileUpload::make('vector_file')
                 ->label('Vector File')
                 ->directory('sponsor-logos-vector')
@@ -124,8 +126,15 @@ class SponsorLogoResource extends Resource
                     ->label('Needs Conversion'),
             ])
             ->actions([
+                Tables\Actions\Action::make('viewLogo')
+                    ->label('View logo')
+                    ->icon('heroicon-o-arrow-top-right-on-square')
+                    ->color('gray')
+                    ->visible(fn ($record) => filled($record->file))
+                    ->url(fn ($record) => \Illuminate\Support\Facades\Storage::disk('public')->url($record->file))
+                    ->openUrlInNewTab(),
                 Tables\Actions\Action::make('downloadVector')
-                    ->label('Vector')
+                    ->label('View vector')
                     ->icon('heroicon-o-arrow-down-tray')
                     ->color('gray')
                     ->visible(fn ($record) => filled($record->vector_file))

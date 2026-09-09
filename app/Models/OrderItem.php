@@ -11,12 +11,15 @@ class OrderItem extends Model
 {
     protected $fillable = [
         'order_id', 'product_id', 'unit_price', 'sort_order', 'notes', 'has_club_crest', 'crest_number',
+        'is_goalie_item', 'is_player_item', 'number_color',
     ];
 
     protected $casts = [
         'unit_price' => 'decimal:2',
         'has_club_crest' => 'boolean',
         'crest_number' => 'integer',
+        'is_goalie_item' => 'boolean',
+        'is_player_item' => 'boolean',
     ];
 
     /** Cached across every OrderItem instance for the life of the request — avoids re-querying Attribute on every item in a loop. */

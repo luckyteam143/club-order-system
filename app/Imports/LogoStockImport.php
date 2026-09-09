@@ -19,9 +19,9 @@ use Maatwebsite\Excel\Concerns\WithValidation;
  * Matches LogoStockExport's layout for a round-trip export -> edit -> import.
  * Columns: Logo Stock ID (optional — updates that exact row if given),
  * Club Name / Club Code (at least one, resolves an existing club), Barcode,
- * Logo Type (name, must already exist), Stock Type ("Logo" or "Numbers",
- * defaults to "Logo"), Logo Name, Location, Warehouse (name or code),
- * Position, Qty, Vector File Link.
+ * Logo Type (name, must already exist), Stock Type ("Logo", "Numbers" or
+ * "Sponsor", defaults to "Logo"), Logo Name, Width, Height, Location,
+ * Warehouse (name or code), Position, Qty, Vector File Link, Notes.
  *
  * Rows without a Logo Stock ID are matched against an existing
  * club+logo_type+warehouse combination (if one exists) rather than always
@@ -60,11 +60,13 @@ class LogoStockImport implements SkipsOnFailure, ToCollection, WithChunkReading,
                     'warehouse_id'     => $warehouse->id,
                     'barcode'          => $barcode,
                     'logo_name'        => $logoName,
-                    'size'             => trim((string) ($row['size'] ?? '')) ?: null,
+                    'width'            => trim((string) ($row['width'] ?? '')) ?: null,
+                    'height'           => trim((string) ($row['height'] ?? '')) ?: null,
                     'location'         => trim((string) ($row['location'] ?? '')) ?: null,
                     'position'         => (int) ($row['position'] ?? 0),
                     'qty'              => max(0, (int) ($row['qty'] ?? 0)),
                     'vector_file_link' => trim((string) ($row['vector_file_link'] ?? '')) ?: null,
+                    'notes'            => trim((string) ($row['notes'] ?? '')) ?: null,
                 ];
 
                 if (! empty($row['logo_stock_id'])) {
@@ -102,7 +104,7 @@ class LogoStockImport implements SkipsOnFailure, ToCollection, WithChunkReading,
     {
         $value = strtolower(trim((string) ($row['stock_type'] ?? $row['logo_stock_type'] ?? '')));
 
-        return $value === 'numbers' ? 'numbers' : 'logo';
+        return in_array($value, ['numbers', 'sponsor'], true) ? $value : 'logo';
     }
 
     protected function resolveLogoType(Collection $row): ?LogoType

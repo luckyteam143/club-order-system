@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ProductResource\Pages;
 
+use App\Filament\Concerns\HasFullWidthContent;
 use App\Filament\Resources\ProductResource;
 use App\Imports\ProductsImport;
 use App\Models\Product;
@@ -15,6 +16,8 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class ListProducts extends ListRecords
 {
+    use HasFullWidthContent;
+
     protected static string $resource = ProductResource::class;
 
     public function getFooter(): View
@@ -94,7 +97,7 @@ class ListProducts extends ListRecords
                     ini_set('memory_limit', '2048M');
 
                     try {
-                        $import = new ProductsImport();
+                        $import = new ProductsImport;
                         Excel::import($import, $path);
                     } catch (\Throwable $e) {
                         Storage::disk('local')->delete($data['file']);
@@ -112,13 +115,13 @@ class ListProducts extends ListRecords
 
                     if ($import->errors) {
                         Notification::make()
-                            ->title($import->imported . ' product(s) imported — ' . count($import->errors) . ' row(s) skipped')
+                            ->title($import->imported.' product(s) imported — '.count($import->errors).' row(s) skipped')
                             ->body(implode(' ', array_slice($import->errors, 0, 15)))
                             ->warning()
                             ->send();
                     } else {
                         Notification::make()
-                            ->title($import->imported . ' product(s) imported / updated')
+                            ->title($import->imported.' product(s) imported / updated')
                             ->success()
                             ->send();
                     }

@@ -34,7 +34,10 @@
                 <tr>
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[16rem]">Product</th>
                     <template x-for="w in warehouses" :key="w.id">
-                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-right font-medium w-28" x-text="w.name"></th>
+                        <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-right font-medium w-28">
+                            <span x-text="w.name"></span>
+                            <span class="block text-[10px] font-normal text-gray-400 dark:text-gray-500">qty / on hold</span>
+                        </th>
                     </template>
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-right font-medium w-24">Total</th>
                 </tr>
@@ -45,16 +48,34 @@
                         class="odd:bg-white even:bg-gray-50/50 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-2 font-medium" x-text="productLabel(p)"></td>
                         <template x-for="w in warehouses" :key="w.id">
+                            {{-- qty (left) and on-hold reserve (right) on one
+                                 line, each ~half width. The on-hold input keeps
+                                 its own nav column ('h' + id) so ↑/↓ moves down
+                                 the hold values, not across into qty. --}}
                             <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                                <input type="text" inputmode="numeric" autocomplete="off"
-                                    x-model="pendingEdits[p.id].cells[w.id].qty"
-                                    :data-row="rowIndex" :data-col="w.id"
-                                    :name="'stock_qty_' + p.id + '_' + w.id"
-                                    :id="'stock_qty_' + p.id + '_' + w.id"
-                                    @keydown="onCellKeydown($event)"
-                                    @paste="onPaste($event, rowIndex, w.id)"
-                                    @input="markTouched(p.id); sync()"
-                                    class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm text-right">
+                                <div class="flex items-center gap-1">
+                                    <input type="text" inputmode="numeric" autocomplete="off"
+                                        x-model="pendingEdits[p.id].cells[w.id].qty"
+                                        :data-row="rowIndex" :data-col="w.id"
+                                        :name="'stock_qty_' + p.id + '_' + w.id"
+                                        :id="'stock_qty_' + p.id + '_' + w.id"
+                                        title="Available quantity"
+                                        @keydown="onCellKeydown($event)"
+                                        @paste="onPaste($event, rowIndex, w.id)"
+                                        @input="markTouched(p.id); sync()"
+                                        class="fi-input w-1/2 min-w-0 rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 px-1 text-xs text-right">
+                                    <input type="text" inputmode="numeric" autocomplete="off"
+                                        x-model="pendingEdits[p.id].cells[w.id].on_hold"
+                                        :data-row="rowIndex" :data-col="'h' + w.id"
+                                        :name="'stock_hold_' + p.id + '_' + w.id"
+                                        :id="'stock_hold_' + p.id + '_' + w.id"
+                                        title="On-hold reserve"
+                                        placeholder="hold"
+                                        @keydown="onCellKeydown($event)"
+                                        @input="markTouched(p.id); sync()"
+                                        class="fi-input w-1/2 min-w-0 rounded-md border-gray-200 dark:border-gray-700 dark:bg-gray-900 px-1 text-xs text-right"
+                                        style="color: rgb(var(--warning-600))">
+                                </div>
                             </td>
                         </template>
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-2 text-right font-medium tabular-nums" x-text="rowTotal(p.id)"></td>
@@ -154,8 +175,13 @@ function stockGrid(config) {
                 this.pendingEdits[productId] = { cells: {} };
             }
             this.warehouses.forEach(w => {
-                if (!this.pendingEdits[productId].cells[w.id]) {
-                    this.pendingEdits[productId].cells[w.id] = { qty: '', id: null };
+                const cell = this.pendingEdits[productId].cells[w.id];
+                if (!cell) {
+                    this.pendingEdits[productId].cells[w.id] = { qty: '', id: null, on_hold: '' };
+                } else if (cell.on_hold === undefined) {
+                    // Backfill for state restored from an older save that
+                    // predates the on-hold column.
+                    cell.on_hold = '';
                 }
             });
         },
@@ -179,7 +205,11 @@ function stockGrid(config) {
                 Object.entries(result || {}).forEach(([productId, stocks]) => {
                     this.ensureProductState(productId);
                     stocks.forEach(stock => {
-                        this.pendingEdits[productId].cells[stock.warehouse_id] = { qty: stock.qty, id: stock.id };
+                        this.pendingEdits[productId].cells[stock.warehouse_id] = {
+                            qty: stock.qty,
+                            id: stock.id,
+                            on_hold: stock.qty_on_hold,
+                        };
                     });
                 });
                 idsToLoad.forEach(id => { delete this.loadingIds[id]; });

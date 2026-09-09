@@ -14,7 +14,8 @@ class LogoStock extends Model
 
     protected $fillable = [
         'club_id', 'barcode', 'logo_type_id', 'logo_stock_type', 'location', 'qty',
-        'logo_name', 'size', 'image', 'vector_file_link', 'warehouse_id', 'position',
+        'logo_name', 'width', 'height', 'image', 'vector_file_link', 'notes',
+        'warehouse_id', 'position',
     ];
 
     public function club(): BelongsTo
@@ -35,7 +36,7 @@ class LogoStock extends Model
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
-            ->logOnly(['club_id', 'barcode', 'logo_type_id', 'logo_stock_type', 'location', 'qty', 'logo_name', 'size', 'warehouse_id', 'position'])
+            ->logOnly(['club_id', 'barcode', 'logo_type_id', 'logo_stock_type', 'location', 'qty', 'logo_name', 'width', 'height', 'notes', 'warehouse_id', 'position'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->useLogName('logo_stock')

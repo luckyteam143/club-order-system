@@ -28,8 +28,33 @@ class ProductResource extends Resource
                     ->label('Barcode')
                     ->unique(ignoreRecord: true)
                     ->validationMessages(['unique' => 'Another product already uses this barcode.']),
-                Forms\Components\TextInput::make('parent_sku')
-                    ->helperText('Leave blank if this is a parent/master product.'),
+                Forms\Components\Select::make('parent_sku')
+                    ->label('Parent SKU')
+                    ->helperText('Leave blank if this is a parent/master product. Otherwise pick the parent by its Default SKU — only products that are themselves parents are listed.')
+                    ->searchable()
+                    // The catalog runs into the tens of thousands of products —
+                    // search remotely instead of preloading every option.
+                    // Only parents (no parent_sku of their own) are offered,
+                    // and never the record being edited.
+                    ->getSearchResultsUsing(fn (string $search, ?Product $record) => Product::query()
+                        ->whereNull('parent_sku')
+                        ->whereNotNull('default_sku')
+                        ->when($record, fn (Builder $query) => $query->whereKeyNot($record->getKey()))
+                        ->where(fn (Builder $query) => $query
+                            ->where('default_sku', 'like', "%{$search}%")
+                            ->orWhere('name', 'like', "%{$search}%"))
+                        ->orderBy('name')
+                        ->limit(50)
+                        ->get()
+                        ->mapWithKeys(fn (Product $parent) => [
+                            $parent->default_sku => "{$parent->default_sku} — {$parent->name}",
+                        ]))
+                    ->getOptionLabelUsing(function ($value) {
+                        $parent = Product::where('default_sku', $value)->first();
+
+                        return $parent ? "{$parent->default_sku} — {$parent->name}" : $value;
+                    })
+                    ->exists(table: Product::class, column: 'default_sku'),
                 Forms\Components\TextInput::make('default_sku')
                     ->label('Default SKU')
                     ->unique(ignoreRecord: true)
@@ -113,7 +138,7 @@ class ProductResource extends Resource
                 Tables\Columns\TextColumn::make('default_sku')->label('Default SKU')->searchable()->toggleable(),
                 Tables\Columns\TextColumn::make('size')->searchable(),
                 Tables\Columns\TextColumn::make('parent_sku')->label('Parent SKU')->searchable()->toggleable(),
-                Tables\Columns\TextColumn::make('barcode')->label('Barcode')->searchable()->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('barcode')->label('Barcode')->searchable()->toggleable(),
                 Tables\Columns\ViewColumn::make('status')
                     ->view('filament.tables.columns.products-editable-cell')
                     ->viewData(['type' => 'select', 'options' => ['Active' => 'Active', 'Inactive' => 'Inactive']])

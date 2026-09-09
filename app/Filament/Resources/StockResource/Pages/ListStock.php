@@ -2,6 +2,9 @@
 
 namespace App\Filament\Resources\StockResource\Pages;
 
+use App\Exports\StockExport;
+use App\Filament\Concerns\HasFullWidthContent;
+use App\Filament\Pages\StockScanner;
 use App\Filament\Resources\StockResource;
 use App\Imports\StockImport;
 use App\Models\Product;
@@ -16,6 +19,8 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class ListStock extends ListRecords
 {
+    use HasFullWidthContent;
+
     protected static string $resource = StockResource::class;
 
     public function getFooter(): View
@@ -74,7 +79,7 @@ class ListStock extends ListRecords
                             'text/csv',
                         ])
                         ->required()
-                        ->helperText('Columns: Product ID (optional if Barcode given), Barcode, Warehouse (name or code), Qty. Matches the Export Excel layout.'),
+                        ->helperText('Columns: Product ID (optional if Barcode given), Barcode, then one Qty column per warehouse (Product Name / Size / Total Look / On Hold (all) / Total are reference only). Matches the Export Excel layout — omitted warehouse columns are left untouched.'),
                 ])
                 ->action(function (array $data) {
                     $path = Storage::disk('local')->path($data['file']);
@@ -84,7 +89,7 @@ class ListStock extends ListRecords
                     ini_set('memory_limit', '512M');
 
                     try {
-                        $import = new StockImport();
+                        $import = new StockImport;
                         Excel::import($import, $path);
                     } catch (\Throwable $e) {
                         Storage::disk('local')->delete($data['file']);
@@ -100,25 +105,30 @@ class ListStock extends ListRecords
 
                     Storage::disk('local')->delete($data['file']);
 
-                    if ($import->failures()->isNotEmpty()) {
-                        Notification::make()
-                            ->title('Import finished with ' . $import->failures()->count() . ' row error(s)')
-                            ->body($import->failures()->map(fn ($f) => 'Row ' . $f->row() . ': ' . implode(' ', $f->errors()))->implode('; '))
-                            ->warning()
-                            ->send();
-                    } else {
-                        Notification::make()
-                            ->title('Stock imported successfully')
-                            ->success()
-                            ->send();
-                    }
+                    Notification::make()
+                        ->title('Stock imported successfully')
+                        ->success()
+                        ->send();
                 }),
             Actions\Action::make('export')
                 ->label('Export Excel')
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
-                ->url(route('stock.export'))
-                ->openUrlInNewTab(),
+                ->action(function () {
+                    // Same ceiling as ProductResource's export — the "has
+                    // stock" filter / search can still leave thousands of rows.
+                    ini_set('memory_limit', '1024M');
+
+                    // Respects whatever search + filters (e.g. "Only show
+                    // items with stock") are currently applied to the
+                    // listing, instead of always dumping every active product.
+                    $productIds = $this->getTableQueryForExport()->pluck('id')->all();
+
+                    return Excel::download(
+                        new StockExport($productIds),
+                        'stock-'.now()->format('Y-m-d').'.xlsx',
+                    );
+                }),
             Actions\Action::make('bulk')
                 ->label('Bulk Add / Edit Stock')
                 ->icon('heroicon-o-table-cells')
@@ -128,7 +138,7 @@ class ListStock extends ListRecords
                 ->label('Scan Stock')
                 ->icon('heroicon-o-qr-code')
                 ->color('gray')
-                ->url(\App\Filament\Pages\StockScanner::getUrl()),
+                ->url(StockScanner::getUrl()),
             Actions\CreateAction::make(),
         ];
     }

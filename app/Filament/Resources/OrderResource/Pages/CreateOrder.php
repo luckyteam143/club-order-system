@@ -7,12 +7,22 @@ use App\Filament\Resources\OrderResource\Concerns\PersistsOrderGrid;
 use Filament\Actions;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\CreateRecord;
+use Filament\Support\Enums\MaxWidth;
 
 class CreateOrder extends CreateRecord
 {
     use PersistsOrderGrid;
 
     protected static string $resource = OrderResource::class;
+
+    // Filament's default 7xl (80rem) content width plus side padding was
+    // squeezing the item-column grid — it can run much wider than that on
+    // a package/individual order with several items — into needing
+    // horizontal scrolling far sooner than the viewport actually requires.
+    public function getMaxContentWidth(): MaxWidth | string | null
+    {
+        return MaxWidth::Full;
+    }
 
     public function mount(): void
     {
@@ -56,6 +66,20 @@ class CreateOrder extends CreateRecord
     protected function getFormActions(): array
     {
         return [];
+    }
+
+    /**
+     * Filament's own CreateRecord default redirects to the resource's
+     * 'view' page after a create when one exists — OrderResource has one
+     * (ViewOrder, a read-only infolist), so "Save as Draft" was landing
+     * there instead of staying on the fully-editable roster grid. A draft
+     * still needs more work (roster, items…), so send it to 'edit' instead,
+     * same as every other place this app redirects into a fresh order
+     * (Duplicate, Submit Order).
+     */
+    protected function getRedirectUrl(): string
+    {
+        return static::getResource()::getUrl('edit', ['record' => $this->getRecord()]);
     }
 
     protected function mutateFormDataBeforeCreate(array $data): array

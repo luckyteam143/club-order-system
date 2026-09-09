@@ -9,7 +9,7 @@ class Order extends Model
     protected $fillable = [
         'club_id', 'club_team_id', 'package_id', 'created_by', 'type', 'order_kind', 'status', 'is_copy', 'total', 'notes', 'submitted_at',
         'team_po', 'coach_manager', 'shipping_address', 'phone', 'email',
-        'order_date', 'b2b_number', 'qb_invoice', 'brochure_link', 'last_changed_cells', 'forecast_season',
+        'order_date', 'b2b_number', 'qb_invoice', 'brochure_link', 'required_by_date', 'last_changed_cells', 'forecast_season',
         'picking_status', 'picking_assigned_to', 'picking_sent_at', 'picking_completed_at',
     ];
 
@@ -18,6 +18,7 @@ class Order extends Model
         'is_copy' => 'boolean',
         'submitted_at' => 'datetime',
         'order_date' => 'date',
+        'required_by_date' => 'date',
         'last_changed_cells' => 'array',
         'picking_sent_at' => 'datetime',
         'picking_completed_at' => 'datetime',

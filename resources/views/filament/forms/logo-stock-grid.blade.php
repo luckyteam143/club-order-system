@@ -37,11 +37,13 @@
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[10rem]">Logo Type</th>
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium w-28">Stock Type</th>
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[10rem]">Logo Name</th>
-                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium w-24">Size</th>
+                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium w-20">Width</th>
+                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium w-20">Height</th>
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium w-28">Location</th>
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[10rem]">Warehouse</th>
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-right font-medium w-20">Position</th>
                     <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-right font-medium w-20">Qty</th>
+                    <th class="border-b border-r border-gray-200 dark:border-gray-700 px-2 py-2 text-left font-medium min-w-[10rem]">Notes</th>
                     <th class="border-b border-gray-200 dark:border-gray-700 px-2 py-2 w-10"></th>
                 </tr>
             </thead>
@@ -78,6 +80,7 @@
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                                 <option value="logo">Logo</option>
                                 <option value="numbers">Numbers</option>
+                                <option value="sponsor">Sponsor</option>
                             </select>
                         </td>
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
@@ -85,7 +88,11 @@
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                         </td>
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
-                            <input type="text" x-model="row.size" autocomplete="off"
+                            <input type="text" x-model="row.width" autocomplete="off"
+                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
+                        </td>
+                        <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                            <input type="text" x-model="row.height" autocomplete="off"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                         </td>
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
@@ -108,6 +115,10 @@
                         <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
                             <input type="text" inputmode="numeric" x-model="row.qty" autocomplete="off"
                                 class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm text-right">
+                        </td>
+                        <td class="border-b border-r border-gray-100 dark:border-gray-800 p-1">
+                            <input type="text" x-model="row.notes" autocomplete="off"
+                                class="fi-input w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 text-sm">
                         </td>
                         <td class="border-b border-gray-100 dark:border-gray-800 p-1 text-center">
                             <button type="button" @click="removeRow(rowIndex)" title="Remove row"
@@ -167,7 +178,9 @@ function logoStockGrid(config) {
                 logo_stock_type: 'logo',
                 location: '',
                 logo_name: '',
-                size: '',
+                width: '',
+                height: '',
+                notes: '',
                 warehouse_id: '',
                 position: 0,
                 qty: 0,

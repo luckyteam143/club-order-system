@@ -23,7 +23,8 @@ class LogoStockExport implements FromCollection, WithHeadings, WithMapping, With
     {
         return [
             'Logo Stock ID', 'Club Name', 'Club Code', 'Barcode', 'Logo Type', 'Stock Type',
-            'Logo Name', 'Size', 'Location', 'Warehouse', 'Position', 'Qty', 'Vector File Link',
+            'Logo Name', 'Width', 'Height', 'Location', 'Warehouse', 'Position', 'Qty',
+            'Vector File Link', 'Notes',
         ];
     }
 
@@ -42,14 +43,20 @@ class LogoStockExport implements FromCollection, WithHeadings, WithMapping, With
             $logoStock->club?->code,
             $logoStock->barcode,
             $logoStock->logoType?->name,
-            $logoStock->logo_stock_type === 'numbers' ? 'Numbers' : 'Logo',
+            match ($logoStock->logo_stock_type) {
+                'numbers' => 'Numbers',
+                'sponsor' => 'Sponsor',
+                default   => 'Logo',
+            },
             $logoStock->logo_name,
-            $logoStock->size,
+            $logoStock->width,
+            $logoStock->height,
             $logoStock->location,
             $logoStock->warehouse?->name,
             $logoStock->position,
             $logoStock->qty,
             $logoStock->vector_file_link,
+            $logoStock->notes,
         ];
     }
 

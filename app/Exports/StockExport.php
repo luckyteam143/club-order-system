@@ -2,7 +2,8 @@
 
 namespace App\Exports;
 
-use App\Models\ProductWarehouseStock;
+use App\Models\Product;
+use App\Models\Warehouse;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
@@ -12,8 +13,28 @@ use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
+/**
+ * One row per product, one column per warehouse — mirrors the Stock
+ * listing's matrix layout (StockResource::table) so the export, import and
+ * on-screen grid all read the same way. StockImport parses this same shape
+ * back in.
+ */
 class StockExport implements FromCollection, WithHeadings, WithMapping, WithStyles, WithTitle, ShouldAutoSize
 {
+    /** @var Collection<int, Warehouse> */
+    private Collection $warehouses;
+
+    /**
+     * @param  array<int>|null  $productIds  When given, only these products are
+     *                                       exported (the "export selected rows"
+     *                                       bulk action). Null exports every
+     *                                       active product.
+     */
+    public function __construct(private ?array $productIds = null)
+    {
+        $this->warehouses = Warehouse::where('status', 'active')->orderBy('name')->get(['id', 'name']);
+    }
+
     public function title(): string
     {
         return 'Stock';
@@ -21,26 +42,35 @@ class StockExport implements FromCollection, WithHeadings, WithMapping, WithStyl
 
     public function headings(): array
     {
-        return ['Product ID', 'Barcode', 'Product Name', 'Warehouse', 'Qty'];
+        return [
+            'Product ID', 'Barcode', 'Product Name', 'Size', 'Total Look',
+            ...$this->warehouses->pluck('name')->all(),
+            'On Hold (all)', 'Total',
+        ];
     }
 
     public function collection(): Collection
     {
-        return ProductWarehouseStock::with(['product', 'warehouse'])
-            ->join('products', 'products.id', '=', 'product_warehouse_stock.product_id')
-            ->orderBy('products.name')
-            ->select('product_warehouse_stock.*')
-            ->get();
+        $query = Product::query()->where('status', 'Active')->with('warehouseStocks');
+
+        if ($this->productIds !== null) {
+            $query->whereIn('id', $this->productIds);
+        }
+
+        return $query->orderBy('name')->get();
     }
 
-    public function map($stock): array
+    public function map($product): array
     {
         return [
-            $stock->product_id,
-            $stock->product?->barcode,
-            $stock->product?->name,
-            $stock->warehouse?->name,
-            $stock->qty,
+            $product->id,
+            $product->barcode,
+            $product->name,
+            $product->size,
+            $product->total_look,
+            ...$this->warehouses->map(fn (Warehouse $warehouse) => $product->warehouseStocks->firstWhere('warehouse_id', $warehouse->id)?->qty ?? 0)->all(),
+            (int) $product->warehouseStocks->sum('qty_on_hold'),
+            $product->qty,
         ];
     }
 
