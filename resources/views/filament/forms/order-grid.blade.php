@@ -507,10 +507,14 @@ function orderGrid(config) {
         // never needs resetting back to false.
         formSubmitting: false,
 
-        // Holds the order Type we're programmatically reverting to after a
-        // cancelled "switching type clears the items" prompt, so the type
-        // watcher can tell that echo apart from a real user change.
-        typeRevertGuard: null,
+        // The order Type / Package the item grid was last built against.
+        // Both the type and package watchers compare against these (rather
+        // than Alpine's occasionally-stale oldValue) so they can tell a
+        // real user change apart from the echo of a programmatic revert,
+        // and know what to put the dropdown back to when a "this clears
+        // your items" prompt is cancelled.
+        appliedType: null,
+        appliedPackageId: null,
 
         init() {
             this.columns = (config.initial.columns || []).map(c => ({ ...c }));
@@ -531,8 +535,28 @@ function orderGrid(config) {
 
             this.ensureDefaultRows();
 
-            this.$watch(() => this.$wire.data.package_id, () => {
-                if (this.isPackageType()) this.loadPackageItems();
+            this.appliedType = this.$wire.data.type ?? null;
+            this.appliedPackageId = this.$wire.data.package_id ?? null;
+
+            // Changing the Package rebuilds the item columns from the newly
+            // selected package and wipes everything entered against the old
+            // ones — same destructive reload the type watcher guards, so
+            // warn first whenever the grid already has columns, and put the
+            // dropdown back if the user cancels.
+            this.$watch(() => this.$wire.data.package_id, (newPkg) => {
+                if (! this.isPackageType()) { this.appliedPackageId = newPkg ?? null; return; }
+                if ((newPkg ?? null) === this.appliedPackageId) return;
+
+                if (newPkg && this.columns.length > 0 && ! confirm(
+                    'Changing the package rebuilds the item columns from the new package and '
+                    + 'clears everything entered against the current items — sizes, quantities, '
+                    + 'sponsor logos and embellishments. Continue?'
+                )) {
+                    this.revertSelect('data.package_id', this.appliedPackageId);
+                    return;
+                }
+
+                this.loadPackageItems();
             });
 
             // Changing the order Type invalidates the current item columns
@@ -541,16 +565,14 @@ function orderGrid(config) {
             // user has entered, and revert the dropdown if they cancel;
             // otherwise reset the item section to the new type's starting
             // layout.
-            this.$watch(() => this.$wire.data.type, (newType, oldType) => {
-                if (newType === this.typeRevertGuard) { this.typeRevertGuard = null; return; }
-                if (newType === oldType) return;
+            this.$watch(() => this.$wire.data.type, (newType) => {
+                if ((newType ?? null) === this.appliedType) return;
 
                 if (this.columns.length > 0 && ! confirm(
                     'Switching the order type clears the current item list and everything entered '
                     + 'against it — sizes, quantities, sponsor logos and embellishments. Continue?'
                 )) {
-                    this.typeRevertGuard = oldType;
-                    this.$wire.set('data.type', oldType);
+                    this.revertSelect('data.type', this.appliedType);
                     return;
                 }
 
@@ -1046,6 +1068,10 @@ function orderGrid(config) {
         // still fully editable per-order afterward via those sections below.
         loadPackageItems() {
             const pkgId = this.$wire.data.package_id;
+            // Record what the grid is now built against even when we bail
+            // out below (package cleared / not in the catalog), so the
+            // watcher doesn't re-prompt on the next change.
+            this.appliedPackageId = pkgId ?? null;
             const pkg = this.packages.find(p => p.id == pkgId);
             if (!pkg) return;
 
@@ -1141,14 +1167,25 @@ function orderGrid(config) {
             this.embellishmentRows = [];
             this.changedCellKeys = new Set();
             this.rows = [];
+            this.appliedType = this.$wire.data.type ?? null;
 
             if (this.isPackageType() && this.$wire.data.package_id) {
                 this.loadPackageItems();
             } else {
+                this.appliedPackageId = this.$wire.data.package_id ?? null;
                 this.ensureDefaultRows();
                 this.ensureAllCells();
                 this.sync();
             }
+        },
+
+        // Put a Filament <select> back to a previous value after the user
+        // cancels a destructive prompt. Deferred a tick so our revert
+        // commit lands after the live-binding commit from the change we're
+        // undoing — doing it synchronously inside the watcher raced that
+        // commit and the field could stay stuck on the cancelled option.
+        revertSelect(statePath, value) {
+            setTimeout(() => { this.$wire.$set(statePath, value ?? null); }, 0);
         },
 
         addSponsorRow() {

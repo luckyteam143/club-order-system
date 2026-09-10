@@ -113,6 +113,8 @@ class PackageItemsImport implements SkipsEmptyRows, ToCollection, WithHeadingRow
                 $this->imported++;
             }
         });
+
+        \App\Filament\Resources\OrderResource::clearGridCatalogCache();
     }
 
     private function price($value): ?float

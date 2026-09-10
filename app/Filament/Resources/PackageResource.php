@@ -260,7 +260,7 @@ class PackageResource extends Resource
      */
     public static function duplicatePackage(Package $source): Package
     {
-        return \Illuminate\Support\Facades\DB::transaction(function () use ($source) {
+        $duplicate = \Illuminate\Support\Facades\DB::transaction(function () use ($source) {
             $source->loadMissing(['packageProducts.sponsors', 'packageProducts.embellishments']);
 
             $duplicate = Package::create([
@@ -303,6 +303,10 @@ class PackageResource extends Resource
 
             return $duplicate;
         });
+
+        OrderResource::clearGridCatalogCache();
+
+        return $duplicate;
     }
 
     public static function getRelations(): array

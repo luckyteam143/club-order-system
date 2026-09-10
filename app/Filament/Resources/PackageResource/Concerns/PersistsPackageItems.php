@@ -145,6 +145,10 @@ trait PersistsPackageItems
             $this->persistSponsors($productIdToPackageProductId, $sponsors);
             $this->persistEmbellishments($productIdToPackageProductId, $embellishments);
         });
+
+        // The order grid's package catalog is cached — drop it so a just-
+        // edited package's items show up on the next order page load.
+        \App\Filament\Resources\OrderResource::clearGridCatalogCache();
     }
 
     private function persistSponsors(array $productIdToPackageProductId, array $sponsors): void

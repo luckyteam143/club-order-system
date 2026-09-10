@@ -12,7 +12,8 @@ use App\Http\Controllers\OrderController;
 use App\Http\Controllers\PackageController;
 use App\Http\Controllers\ProductController;
 
-Route::get('/', fn () => redirect('/admin'));
+// Route::redirect (not a closure) so `route:cache` can serialize it.
+Route::redirect('/', '/admin');
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/orders/{order}/export', [OrderController::class, 'export'])->name('orders.export');

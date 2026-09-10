@@ -25,6 +25,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class OrderResource extends Resource
@@ -730,37 +731,50 @@ class OrderResource extends Resource
 
     private static function productsCatalogForGrid(): array
     {
-        // The live catalog can run into the thousands of rows with tens of
-        // thousands of attribute pivot rows. Hydrating those as Eloquent
-        // models (each attribute row becomes a full Attribute model wrapped
-        // in a Pivot instance) is what actually blows the memory limit —
-        // pull everything through the query builder instead, which returns
-        // lightweight stdClass rows.
-        $products = DB::table('products')
-            ->select(['id', 'name', 'retail_price'])
-            ->whereNull('parent_sku')
-            ->where('status', 'Active')
-            ->orderBy('name')
-            ->get();
+        // Filament rebuilds the whole form schema (this ViewField's viewData
+        // included) on every reactive round-trip — changing the club, type
+        // or package, and anything else `->live()`. Rebuilding the ~4k-row
+        // product catalog from scratch each time is what made the order page
+        // feel sluggish, so cache it briefly; product names/sizes/prices
+        // barely move during an order-entry session, and the per-row price
+        // is only a starting default here (still editable, still recomputed
+        // server-side on save).
+        return Cache::remember('order_grid:products_catalog', now()->addSeconds(120), function () {
+            // The live catalog can run into the thousands of rows with tens
+            // of thousands of attribute pivot rows. Hydrating those as
+            // Eloquent models (each attribute row becomes a full Attribute
+            // model wrapped in a Pivot instance) is what actually blows the
+            // memory limit — pull everything through the query builder
+            // instead, which returns lightweight stdClass rows.
+            $products = DB::table('products')
+                ->select(['id', 'name', 'retail_price'])
+                ->whereNull('parent_sku')
+                ->where('status', 'Active')
+                ->orderBy('name')
+                ->get();
 
-        $sizesByProductId = DB::table('attribute_product')
-            ->join('attributes', 'attributes.id', '=', 'attribute_product.attribute_id')
-            ->whereIn('attribute_product.product_id', $products->pluck('id'))
-            ->select(['attribute_product.product_id', 'attributes.name'])
-            ->orderBy('attributes.position')
-            ->orderBy('attributes.name')
-            ->get()
-            ->groupBy('product_id');
+            // One GROUP_CONCAT row per product rather than ~30k pivot rows
+            // to pull down and group in PHP. 0x1F (unit separator) can't
+            // occur in an attribute name, and no product has enough sizes
+            // to approach group_concat_max_len.
+            $sizesByProductId = DB::table('attribute_product')
+                ->join('attributes', 'attributes.id', '=', 'attribute_product.attribute_id')
+                ->whereIn('attribute_product.product_id', $products->pluck('id'))
+                ->groupBy('attribute_product.product_id')
+                ->selectRaw('attribute_product.product_id, GROUP_CONCAT(attributes.name ORDER BY attributes.position, attributes.name SEPARATOR 0x1F) as sizes')
+                ->get()
+                ->pluck('sizes', 'product_id');
 
-        return $products
-            ->map(fn ($product) => [
-                'id' => $product->id,
-                'name' => $product->name,
-                'price' => (float) $product->retail_price,
-                'sizes' => ($sizesByProductId->get($product->id) ?? collect())->pluck('name')->values()->all(),
-            ])
-            ->values()
-            ->all();
+            return $products
+                ->map(fn ($product) => [
+                    'id' => $product->id,
+                    'name' => $product->name,
+                    'price' => (float) $product->retail_price,
+                    'sizes' => ($raw = $sizesByProductId->get($product->id)) ? explode("\x1f", $raw) : [],
+                ])
+                ->values()
+                ->all();
+        });
     }
 
     /**
@@ -828,13 +842,15 @@ class OrderResource extends Resource
      */
     private static function clubItemsCatalogForGrid(): array
     {
-        $pairs = DB::table('club_product')->select(['club_id', 'product_id', 'online_store_price'])->get();
+        return Cache::remember('order_grid:club_items_catalog', now()->addSeconds(120), function () {
+            $pairs = DB::table('club_product')->select(['club_id', 'product_id', 'online_store_price'])->get();
 
-        return $pairs->groupBy('club_id')
-            ->map(fn ($rows) => $rows->pluck('online_store_price', 'product_id')
-                ->map(fn ($price) => (float) $price)
-                ->all())
-            ->all();
+            return $pairs->groupBy('club_id')
+                ->map(fn ($rows) => $rows->pluck('online_store_price', 'product_id')
+                    ->map(fn ($price) => (float) $price)
+                    ->all())
+                ->all();
+        });
     }
 
     /**
@@ -846,61 +862,88 @@ class OrderResource extends Resource
      */
     private static function clubItemsCrestForGrid(): array
     {
-        $pairs = DB::table('club_product')
-            ->select(['club_id', 'product_id', 'has_club_crest', 'crest_number'])
-            ->get();
+        return Cache::remember('order_grid:club_items_crest', now()->addSeconds(120), function () {
+            $pairs = DB::table('club_product')
+                ->select(['club_id', 'product_id', 'has_club_crest', 'crest_number'])
+                ->get();
 
-        return $pairs->groupBy('club_id')
-            ->map(fn ($rows) => $rows->mapWithKeys(fn ($r) => [$r->product_id => [
-                'has_club_crest' => (bool) $r->has_club_crest,
-                'crest_number' => (int) ($r->crest_number ?? 1),
-            ]])->all())
-            ->all();
+            return $pairs->groupBy('club_id')
+                ->map(fn ($rows) => $rows->mapWithKeys(fn ($r) => [$r->product_id => [
+                    'has_club_crest' => (bool) $r->has_club_crest,
+                    'crest_number' => (int) ($r->crest_number ?? 1),
+                ]])->all())
+                ->all();
+        });
     }
 
     private static function packagesCatalogForGrid(): array
     {
-        // Queried directly off package_product (rather than through
-        // Package::products()) so the sponsor/embellishment predefined on
-        // each package item can be eager-loaded in one shot.
-        $packageProducts = PackageProduct::with(['sponsors', 'embellishments'])->orderBy('sort_order')->get();
+        // Rebuilt on every reactive round-trip like the rest of the grid's
+        // viewData — cache briefly (short TTL + explicit bust on package
+        // edits, see clearGridCatalogCache()).
+        return Cache::remember('order_grid:packages_catalog', now()->addSeconds(60), function () {
+            // Queried directly off package_product (rather than through
+            // Package::products()) so the sponsor/embellishment predefined on
+            // each package item can be eager-loaded in one shot.
+            $packageProducts = PackageProduct::with(['sponsors', 'embellishments'])->orderBy('sort_order')->get();
 
-        $productPrices = Product::whereIn('id', $packageProducts->pluck('product_id')->unique())
-            ->pluck('retail_price', 'id');
+            $productPrices = Product::whereIn('id', $packageProducts->pluck('product_id')->unique())
+                ->pluck('retail_price', 'id');
 
-        $packageProductsByPackage = $packageProducts->groupBy('package_id');
+            $packageProductsByPackage = $packageProducts->groupBy('package_id');
 
-        return Package::all()->map(function (Package $package) use ($packageProductsByPackage, $productPrices) {
-            $items = ($packageProductsByPackage->get($package->id) ?? collect())
-                ->map(fn (PackageProduct $packageProduct) => [
-                    'product_id' => $packageProduct->product_id,
-                    'price' => (float) ($packageProduct->per_item_price ?? $productPrices->get($packageProduct->product_id) ?? 0),
-                    'has_club_crest' => (bool) $packageProduct->has_club_crest,
-                    'crest_number' => (int) ($packageProduct->crest_number ?? 1),
-                    'is_goalie_item' => (bool) $packageProduct->is_goalie_item,
-                    'is_player_item' => (bool) $packageProduct->is_player_item,
-                    'number_color' => $packageProduct->number_color,
-                    'sponsors' => $packageProduct->sponsors->map(fn ($s) => [
-                        'sponsor_logo_id' => $s->sponsor_logo_id,
-                        'embellishment_position_id' => $s->embellishment_position_id,
-                        'brochure_link' => $s->brochure_link,
-                        'override_price' => is_null($s->override_price) ? null : (float) $s->override_price,
-                    ])->values()->all(),
-                    'embellishments' => $packageProduct->embellishments->map(fn ($e) => [
-                        'embellishment_id' => $e->embellishment_id,
-                        'embellishment_position_id' => $e->embellishment_position_id,
-                        'override_price' => is_null($e->override_price) ? null : (float) $e->override_price,
-                    ])->values()->all(),
-                ])
-                ->values()
-                ->all();
+            return Package::all()->map(function (Package $package) use ($packageProductsByPackage, $productPrices) {
+                $items = ($packageProductsByPackage->get($package->id) ?? collect())
+                    ->map(fn (PackageProduct $packageProduct) => [
+                        'product_id' => $packageProduct->product_id,
+                        'price' => (float) ($packageProduct->per_item_price ?? $productPrices->get($packageProduct->product_id) ?? 0),
+                        'has_club_crest' => (bool) $packageProduct->has_club_crest,
+                        'crest_number' => (int) ($packageProduct->crest_number ?? 1),
+                        'is_goalie_item' => (bool) $packageProduct->is_goalie_item,
+                        'is_player_item' => (bool) $packageProduct->is_player_item,
+                        'number_color' => $packageProduct->number_color,
+                        'sponsors' => $packageProduct->sponsors->map(fn ($s) => [
+                            'sponsor_logo_id' => $s->sponsor_logo_id,
+                            'embellishment_position_id' => $s->embellishment_position_id,
+                            'brochure_link' => $s->brochure_link,
+                            'override_price' => is_null($s->override_price) ? null : (float) $s->override_price,
+                        ])->values()->all(),
+                        'embellishments' => $packageProduct->embellishments->map(fn ($e) => [
+                            'embellishment_id' => $e->embellishment_id,
+                            'embellishment_position_id' => $e->embellishment_position_id,
+                            'override_price' => is_null($e->override_price) ? null : (float) $e->override_price,
+                        ])->values()->all(),
+                    ])
+                    ->values()
+                    ->all();
 
-            return [
-                'id' => $package->id,
-                'club_id' => $package->club_id,
-                'price' => (float) $package->price,
-                'items' => $items,
-            ];
-        })->values()->all();
+                return [
+                    'id' => $package->id,
+                    'club_id' => $package->club_id,
+                    'price' => (float) $package->price,
+                    'items' => $items,
+                ];
+            })->values()->all();
+        });
+    }
+
+    /**
+     * Grid catalog reads (products / packages / club-items) are cached for
+     * a short window because Filament rebuilds the whole form — and this
+     * ViewField's viewData with it — on every reactive round-trip. Call
+     * this after anything that changes those catalogs (package edits,
+     * product / club-item imports) so the next order page picks it up
+     * immediately instead of waiting out the TTL.
+     */
+    public static function clearGridCatalogCache(): void
+    {
+        foreach ([
+            'order_grid:products_catalog',
+            'order_grid:packages_catalog',
+            'order_grid:club_items_catalog',
+            'order_grid:club_items_crest',
+        ] as $key) {
+            Cache::forget($key);
+        }
     }
 }

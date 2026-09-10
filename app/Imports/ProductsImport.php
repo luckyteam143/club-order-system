@@ -97,6 +97,11 @@ class ProductsImport implements SkipsEmptyRows, ToCollection, WithHeadingRow
 
             gc_collect_cycles();
         }
+
+        // The order grid's catalog reads are cached for a short window —
+        // drop them now so a bulk import's new names/sizes/prices show up
+        // on the next order page load instead of waiting out the TTL.
+        \App\Filament\Resources\OrderResource::clearGridCatalogCache();
     }
 
     /**
