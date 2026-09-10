@@ -364,11 +364,12 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
     }
 
     /**
-     * Combined across every roster table — an item with two locations
-     * (goalkeeper + player) gets a formula that sums a COUNTIF per
-     * location; an item with its usual single location gets the exact
-     * same single-COUNTIF formula this produced before the roster could
-     * ever split, so a plain order's summary is byte-for-byte unchanged.
+     * One line per product, combined across every roster table it occupies
+     * — an item split goalkeeper + player, or the same product added as two
+     * order items, gets a single row whose cells sum a COUNTIF per column;
+     * a product with its usual single column gets the exact same
+     * single-COUNTIF formula this produced before, so an order with no
+     * repeats and no split is byte-for-byte unchanged.
      *
      * @param  Collection<int, OrderItem>  $items
      * @param  array<int, list<array{col: string, headerRow: int, dataRowStart: int, dataRowEnd: int, formulasUsable: bool}|null>>  $itemLocations  order item id => its roster location(s)
@@ -423,16 +424,38 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
         $grandTotal = 0;
         $firstItemRow = $row;
 
-        foreach ($items as $item) {
-            $itemCells = $allCells->where('order_item_id', $item->id);
-            $itemTotal = 0;
-            $locations = array_values(array_filter($itemLocations[$item->id] ?? []));
+        // The same product can be on an order as more than one order item
+        // (a package that lists it twice, a goalkeeper + player split, a
+        // hand-built order). Collapse those onto one summary line whose
+        // size cells COUNTIF across every roster column the product
+        // occupies, so a repeated item shows a single combined total and
+        // the totals stay formula-driven. product_id keys the grouping;
+        // the rare item with no product falls back to its own id so it is
+        // never merged with another.
+        $itemGroups = $items->groupBy(fn (OrderItem $item) => $item->product_id ?? "item-{$item->id}");
 
-            // Only formula-driven when every table this item appears in
-            // can support it — a single-location item (the common case,
-            // including every order this split doesn't apply to) reduces
-            // to exactly the one-COUNTIF formula built before the roster
-            // could ever split into two tables.
+        foreach ($itemGroups as $groupItems) {
+            $groupItems = $groupItems->values();
+            $groupItemIds = $groupItems->pluck('id')->all();
+            $representative = $groupItems->first();
+
+            $itemCells = $allCells->whereIn('order_item_id', $groupItemIds);
+            $itemTotal = 0;
+
+            // Every roster column occupied by any item in this group, in
+            // first-seen order. A single-item group with one location
+            // reduces to exactly the one-COUNTIF formula built before this
+            // grouping existed, so an order with no repeats is unchanged.
+            $locations = collect($groupItemIds)
+                ->flatMap(fn ($id) => $itemLocations[$id] ?? [])
+                ->filter()
+                ->values()
+                ->all();
+
+            // Only formula-driven when every table these items appear in
+            // can support it (bulk / forecast orders have no roster to
+            // COUNTIF against) — otherwise the group's cells fall back to a
+            // static sum of its order items' quantities.
             $useFormulas = $sizes->isNotEmpty() && $locations !== []
                 && collect($locations)->every(fn ($l) => $l['formulasUsable']);
 
@@ -440,7 +463,7 @@ class OrderExport implements FromCollection, WithEvents, WithPreCalculateFormula
 
             // Point at the roster's own header cell rather than baking in
             // the name twice, so editing it there keeps this in sync.
-            $sheet->setCellValue("A{$row}", $firstLocation ? "={$firstLocation['col']}{$firstLocation['headerRow']}" : ($item->product?->name ?? 'Item'));
+            $sheet->setCellValue("A{$row}", $firstLocation ? "={$firstLocation['col']}{$firstLocation['headerRow']}" : ($representative->product?->name ?? 'Item'));
             $this->bordered($sheet, "A{$row}", Alignment::HORIZONTAL_LEFT, wrap: true);
 
             $col = 2;
